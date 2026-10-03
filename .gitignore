@@ -1,0 +1,24 @@
+# CMake build directory
+build/
+
+# Qt Creator
+*.pro.user
+*.pro.user.*
+CMakeLists.txt.user
+CMakeLists.txt.user.*
+
+# IDE
+.vscode/
+.idea/
+
+# Compiled binaries
+*.exe
+*.dll
+*.obj
+*.o
+*.a
+*.lib
+
+# OS
+.DS_Store
+Thumbs.db
