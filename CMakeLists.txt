@@ -14,6 +14,9 @@ find_package(Qt6 REQUIRED COMPONENTS Widgets)
 qt_add_executable(PictureThis
     src/main.cpp
 
+    src/ui/MainWindow.cpp
+    src/ui/MainWindow.h
+
     src/media/ProcessRunner.cpp
     src/media/ProcessRunner.h
 
