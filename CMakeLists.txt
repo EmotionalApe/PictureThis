@@ -13,8 +13,13 @@ find_package(Qt6 REQUIRED COMPONENTS Widgets)
 
 qt_add_executable(PictureThis
     src/main.cpp
-)
 
+    src/media/ProcessRunner.cpp
+    src/media/ProcessRunner.h
+
+    src/media/MediaService.cpp
+    src/media/MediaService.h
+)
 target_link_libraries(PictureThis PRIVATE
     Qt6::Widgets
 )

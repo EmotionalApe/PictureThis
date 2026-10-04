@@ -1,13 +1,34 @@
-#include <QApplication>
-#include <QWidget>
+#include <QCoreApplication>
+#include <QDebug>
 
-int main(int argc, char *argv[]) {
-    QApplication app(argc, argv);
+#include "media/ProcessRunner.h"
+#include "media/MediaService.h"
 
-    QWidget window;
-    window.resize(800, 500);
-    window.setWindowTitle("Picture This");
-    window.show();
+int main(int argc, char *argv[])
+{
+    QCoreApplication app(argc, argv);
 
-    return app.exec();
+    ProcessRunner ffmpeg("ffmpeg.exe");
+    ProcessRunner ffprobe("ffprobe.exe");
+
+    MediaService media(ffmpeg, ffprobe);
+
+    QString error;
+
+    const bool success = media.createVideoFromImageAndAudio(
+        R"(C:\Users\maruf\Downloads\image.jpeg)",
+        R"(C:\Users\maruf\Downloads\audio_test.m4a)",
+        R"(C:\Users\maruf\Downloads\cpp_output.mp4)",
+        &error
+    );
+
+    if (success) {
+        qDebug() << "Video created successfully.";
+        return 0;
+    }
+
+    qDebug().noquote() << "Failed:";
+    qDebug().noquote() << error;
+
+    return 1;
 }
