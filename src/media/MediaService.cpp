@@ -41,6 +41,7 @@ bool MediaService::createVideoFromImageAndAudio(
         "-c:v", "libx264",
         "-r", "5",
         "-pix_fmt", "yuv420p",
+        "-color_range", "tv",
 
         "-c:a", "aac",
         "-b:a", "128k",
