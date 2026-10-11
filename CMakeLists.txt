@@ -9,12 +9,22 @@ set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
 
+set(CMAKE_AUTOMOC ON)
+
 find_package(Qt6 REQUIRED COMPONENTS Widgets)
 
 qt_add_executable(PictureThis
     src/main.cpp
-)
 
+    src/ui/MainWindow.cpp
+    src/ui/MainWindow.h
+
+    src/media/ProcessRunner.cpp
+    src/media/ProcessRunner.h
+
+    src/media/MediaService.cpp
+    src/media/MediaService.h
+)
 target_link_libraries(PictureThis PRIVATE
     Qt6::Widgets
 )
