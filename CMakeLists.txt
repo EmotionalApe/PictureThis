@@ -18,6 +18,8 @@ qt_add_executable(PictureThis
 
     src/ui/MainWindow.cpp
     src/ui/MainWindow.h
+    src/ui/ImageAudioWidget.cpp
+    src/ui/ImageAudioWidget.h
 
     src/media/ProcessRunner.cpp
     src/media/ProcessRunner.h
