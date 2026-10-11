@@ -22,3 +22,6 @@ CMakeLists.txt.user.*
 # OS
 .DS_Store
 Thumbs.db
+
+# Dev Documentation
+dev_docs/

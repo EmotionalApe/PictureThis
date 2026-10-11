@@ -2,69 +2,134 @@
 
 #include "../media/MediaService.h"
 
+#include <QApplication>
+#include <QClipboard>
 #include <QCloseEvent>
+#include <QDateTime>
 #include <QDir>
+#include <QDragEnterEvent>
+#include <QDragMoveEvent>
+#include <QDropEvent>
 #include <QFile>
 #include <QFileDialog>
 #include <QFileInfo>
 #include <QHBoxLayout>
+#include <QImage>
 #include <QLabel>
 #include <QLineEdit>
 #include <QMessageBox>
+#include <QMimeData>
+#include <QPixmap>
 #include <QProgressBar>
 #include <QPushButton>
+#include <QResizeEvent>
+#include <QStandardPaths>
+#include <QUrl>
 #include <QVBoxLayout>
 #include <QWidget>
+
+#include <numeric>
 
 MainWindow::MainWindow(
     MediaService& mediaService,
     QWidget* parent)
     : QMainWindow(parent),
       m_mediaService(mediaService),
+      m_previewLabel(new QLabel(this)),
+      m_imageInfoLabel(new QLabel("No image loaded", this)),
       m_imagePath(new QLineEdit(this)),
       m_audioPath(new QLineEdit(this)),
       m_outputPath(new QLineEdit(this)),
-      m_imageButton(new QPushButton("Choose Image", this)),
-      m_audioButton(new QPushButton("Choose Audio", this)),
-      m_outputButton(new QPushButton("Choose Output", this)),
+      m_imageButton(new QPushButton("Browse...", this)),
+      m_pasteButton(new QPushButton("Paste", this)),
+      m_audioButton(new QPushButton("Browse...", this)),
+      m_audioInfoLabel(new QLabel(this)),
+      m_outputButton(new QPushButton("Browse...", this)),
       m_createButton(new QPushButton("Create Video", this)),
       m_cancelButton(new QPushButton("Cancel", this)),
       m_progressBar(new QProgressBar(this)),
       m_statusLabel(new QLabel("Ready", this))
 {
     setWindowTitle("Picture This");
-    resize(600, 420);
+    resize(780, 480);
+    setAcceptDrops(true);
 
     auto* centralWidget = new QWidget(this);
-    auto* mainLayout = new QVBoxLayout(centralWidget);
+    auto* rootLayout = new QHBoxLayout(centralWidget);
+    rootLayout->setContentsMargins(16, 16, 16, 16);
+    rootLayout->setSpacing(20);
 
+    // --- Left column: Image preview & drop area ---
+    auto* leftWidget = new QWidget(this);
+    auto* leftLayout = new QVBoxLayout(leftWidget);
+    leftLayout->setContentsMargins(0, 0, 0, 0);
+    leftLayout->setSpacing(8);
+
+    auto* previewHeading = new QLabel("Image Preview", this);
+    previewHeading->setStyleSheet("font-weight: bold; font-size: 13px;");
+    leftLayout->addWidget(previewHeading);
+
+    m_previewLabel->setAlignment(Qt::AlignCenter);
+    m_previewLabel->setMinimumSize(260, 260);
+    m_previewLabel->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Expanding);
+    m_previewLabel->setWordWrap(true);
+    m_previewLabel->setText("No image selected\n\nDrag & drop an image or audio here\nor click Paste");
+    m_previewLabel->setStyleSheet(
+        "border: 2px dashed #888888; border-radius: 8px; background-color: rgba(128, 128, 128, 0.08); padding: 12px; color: #555555;"
+    );
+    leftLayout->addWidget(m_previewLabel, 1);
+
+    m_imageInfoLabel->setAlignment(Qt::AlignCenter);
+    m_imageInfoLabel->setStyleSheet("color: #666666; font-size: 11px;");
+    m_imageInfoLabel->setWordWrap(true);
+    leftLayout->addWidget(m_imageInfoLabel);
+
+    // --- Right column: Inputs, Actions, Progress ---
+    auto* rightWidget = new QWidget(this);
+    auto* rightLayout = new QVBoxLayout(rightWidget);
+    rightLayout->setContentsMargins(0, 0, 0, 0);
+    rightLayout->setSpacing(12);
+
+    // Image Input Row
     auto* imageLabel = new QLabel("Image", this);
+    imageLabel->setStyleSheet("font-weight: bold;");
     auto* imageLayout = new QHBoxLayout();
     imageLayout->addWidget(m_imagePath);
     imageLayout->addWidget(m_imageButton);
+    imageLayout->addWidget(m_pasteButton);
+    m_pasteButton->setToolTip("Paste image from clipboard");
 
+    // Audio Input Row
     auto* audioLabel = new QLabel("Audio", this);
+    audioLabel->setStyleSheet("font-weight: bold;");
     auto* audioLayout = new QHBoxLayout();
     audioLayout->addWidget(m_audioPath);
     audioLayout->addWidget(m_audioButton);
 
+    m_audioInfoLabel->setStyleSheet("color: #666666; font-size: 11px;");
+
+    // Output Input Row
     auto* outputLabel = new QLabel("Output", this);
+    outputLabel->setStyleSheet("font-weight: bold;");
     auto* outputLayout = new QHBoxLayout();
     outputLayout->addWidget(m_outputPath);
     outputLayout->addWidget(m_outputButton);
 
-    mainLayout->addWidget(imageLabel);
-    mainLayout->addLayout(imageLayout);
+    rightLayout->addWidget(imageLabel);
+    rightLayout->addLayout(imageLayout);
 
-    mainLayout->addWidget(audioLabel);
-    mainLayout->addLayout(audioLayout);
+    rightLayout->addWidget(audioLabel);
+    rightLayout->addLayout(audioLayout);
+    rightLayout->addWidget(m_audioInfoLabel);
 
-    mainLayout->addWidget(outputLabel);
-    mainLayout->addLayout(outputLayout);
+    rightLayout->addWidget(outputLabel);
+    rightLayout->addLayout(outputLayout);
 
-    mainLayout->addSpacing(20);
+    rightLayout->addStretch(1);
 
+    // Actions & Progress
     auto* actionLayout = new QHBoxLayout();
+    m_createButton->setStyleSheet("padding: 6px 14px; font-weight: bold;");
     actionLayout->addWidget(m_createButton);
     actionLayout->addWidget(m_cancelButton);
     m_cancelButton->setEnabled(false);
@@ -73,14 +138,22 @@ MainWindow::MainWindow(
     m_progressBar->setValue(0);
     m_progressBar->setTextVisible(true);
 
-    mainLayout->addLayout(actionLayout);
-    mainLayout->addWidget(m_progressBar);
-    mainLayout->addWidget(m_statusLabel);
+    rightLayout->addLayout(actionLayout);
+    rightLayout->addWidget(m_progressBar);
+    rightLayout->addWidget(m_statusLabel);
+
+    // Assemble root layout
+    rootLayout->addWidget(leftWidget, 1);
+    rootLayout->addWidget(rightWidget, 2);
 
     setCentralWidget(centralWidget);
 
+    // Wire up events and connections
     connect(m_imageButton, &QPushButton::clicked,
             this, &MainWindow::chooseImage);
+
+    connect(m_pasteButton, &QPushButton::clicked,
+            this, &MainWindow::pasteImageFromClipboard);
 
     connect(m_audioButton, &QPushButton::clicked,
             this, &MainWindow::chooseAudio);
@@ -93,6 +166,12 @@ MainWindow::MainWindow(
 
     connect(m_cancelButton, &QPushButton::clicked,
             this, &MainWindow::cancelVideo);
+
+    connect(m_imagePath, &QLineEdit::textChanged,
+            this, &MainWindow::onImagePathChanged);
+
+    connect(m_audioPath, &QLineEdit::textChanged,
+            this, &MainWindow::onAudioPathChanged);
 
     connect(&m_mediaService, &MediaService::videoCreationStarted,
             this, &MainWindow::onVideoCreationStarted);
@@ -107,6 +186,11 @@ MainWindow::MainWindow(
             this, &MainWindow::onVideoCreationFinished);
 }
 
+MainWindow::~MainWindow()
+{
+    cleanupPastedTempFile();
+}
+
 void MainWindow::chooseImage()
 {
     const QString path = QFileDialog::getOpenFileName(
@@ -117,7 +201,7 @@ void MainWindow::chooseImage()
     );
 
     if (!path.isEmpty()) {
-        m_imagePath->setText(path);
+        setImagePath(path);
     }
 }
 
@@ -131,7 +215,7 @@ void MainWindow::chooseAudio()
     );
 
     if (!path.isEmpty()) {
-        m_audioPath->setText(path);
+        setAudioPath(path);
     }
 }
 
@@ -149,11 +233,283 @@ void MainWindow::chooseOutput()
     }
 }
 
+void MainWindow::setImagePath(const QString& path)
+{
+    const QString trimmed = path.trimmed();
+    if (trimmed != m_pastedTempFilePath) {
+        cleanupPastedTempFile();
+    }
+    m_imagePath->setText(trimmed);
+}
+
+void MainWindow::setAudioPath(const QString& path)
+{
+    m_audioPath->setText(path.trimmed());
+}
+
+void MainWindow::onImagePathChanged(const QString& path)
+{
+    const QString trimmed = path.trimmed();
+    if (trimmed != m_pastedTempFilePath) {
+        cleanupPastedTempFile();
+    }
+    updateImagePreview(trimmed);
+}
+
+void MainWindow::onAudioPathChanged(const QString& path)
+{
+    updateAudioDetails(path.trimmed());
+}
+
+void MainWindow::updateImagePreview(const QString& path)
+{
+    if (path.isEmpty() || !QFile::exists(path)) {
+        m_loadedPixmap = QPixmap();
+        renderPreviewThumbnail();
+        m_imageInfoLabel->setText("No image loaded");
+        return;
+    }
+
+    const QImage img(path);
+    if (img.isNull()) {
+        m_loadedPixmap = QPixmap();
+        m_previewLabel->setPixmap(QPixmap());
+        m_previewLabel->setText("Could not load image\n(unsupported or corrupted format)");
+        m_previewLabel->setStyleSheet(
+            "border: 2px dashed #cc4444; border-radius: 8px; background-color: rgba(200, 50, 50, 0.06); padding: 12px; color: #aa2222;"
+        );
+        m_imageInfoLabel->setText("Unsupported image format");
+        return;
+    }
+
+    m_loadedPixmap = QPixmap::fromImage(img);
+    renderPreviewThumbnail();
+
+    const int w = img.width();
+    const int h = img.height();
+
+    QString ratioStr;
+    const int g = std::gcd(w, h);
+    if (g > 0 && (w / g) <= 32 && (h / g) <= 32) {
+        ratioStr = QString("%1:%2").arg(w / g).arg(h / g);
+    } else if (h > 0) {
+        const double aspect = static_cast<double>(w) / static_cast<double>(h);
+        ratioStr = QString("%1:1").arg(aspect, 0, 'f', 2);
+    }
+
+    const qint64 bytes = QFileInfo(path).size();
+    QString sizeStr;
+    if (bytes < 1024 * 1024) {
+        sizeStr = QString("%1 KB").arg(bytes / 1024.0, 0, 'f', 1);
+    } else {
+        sizeStr = QString("%1 MB").arg(bytes / (1024.0 * 1024.0), 0, 'f', 2);
+    }
+
+    m_imageInfoLabel->setText(QString("%1 × %2 (%3) — %4").arg(w).arg(h).arg(ratioStr, sizeStr));
+}
+
+void MainWindow::renderPreviewThumbnail()
+{
+    if (m_loadedPixmap.isNull()) {
+        m_previewLabel->setPixmap(QPixmap());
+        m_previewLabel->setText("No image selected\n\nDrag & drop an image or audio here\nor click Paste");
+        m_previewLabel->setStyleSheet(
+            "border: 2px dashed #888888; border-radius: 8px; background-color: rgba(128, 128, 128, 0.08); padding: 12px; color: #555555;"
+        );
+        return;
+    }
+
+    const QSize targetSize = m_previewLabel->size() - QSize(16, 16);
+    if (targetSize.width() <= 0 || targetSize.height() <= 0) {
+        return;
+    }
+
+    const QPixmap scaled = m_loadedPixmap.scaled(
+        targetSize,
+        Qt::KeepAspectRatio,
+        Qt::SmoothTransformation
+    );
+    m_previewLabel->setPixmap(scaled);
+    m_previewLabel->setStyleSheet(
+        "border: 1px solid #aaaaaa; border-radius: 8px; background-color: rgba(0, 0, 0, 0.03); padding: 4px;"
+    );
+}
+
+void MainWindow::updateAudioDetails(const QString& path)
+{
+    if (path.isEmpty() || !QFile::exists(path)) {
+        m_audioInfoLabel->setText("");
+        return;
+    }
+
+    double duration = 0.0;
+    QString errorMessage;
+    if (m_mediaService.getMediaDuration(path, duration, &errorMessage)) {
+        const int totalSec = static_cast<int>(duration + 0.5);
+        const int hrs = totalSec / 3600;
+        const int mins = (totalSec % 3600) / 60;
+        const int secs = totalSec % 60;
+
+        QString durStr;
+        if (hrs > 0) {
+            durStr = QString::asprintf("%02d:%02d:%02d", hrs, mins, secs);
+        } else {
+            durStr = QString::asprintf("%02d:%02d", mins, secs);
+        }
+
+        const qint64 bytes = QFileInfo(path).size();
+        QString sizeStr;
+        if (bytes < 1024 * 1024) {
+            sizeStr = QString("%1 KB").arg(bytes / 1024.0, 0, 'f', 1);
+        } else {
+            sizeStr = QString("%1 MB").arg(bytes / (1024.0 * 1024.0), 0, 'f', 2);
+        }
+
+        m_audioInfoLabel->setText(QString("Duration: %1  |  Size: %2").arg(durStr, sizeStr));
+    } else {
+        m_audioInfoLabel->setText("Could not determine audio duration");
+    }
+}
+
+void MainWindow::pasteImageFromClipboard()
+{
+    QClipboard* clipboard = QApplication::clipboard();
+    if (!clipboard) {
+        return;
+    }
+
+    const QMimeData* mimeData = clipboard->mimeData();
+    if (!mimeData) {
+        return;
+    }
+
+    // 1. Raw image data (e.g. screenshot or copied web image)
+    if (mimeData->hasImage()) {
+        const QImage img = qvariant_cast<QImage>(mimeData->imageData());
+        if (!img.isNull()) {
+            cleanupPastedTempFile();
+
+            const QString tempDir = QStandardPaths::writableLocation(QStandardPaths::TempLocation);
+            const QString tempFile = QDir(tempDir).filePath(
+                QString("picture_this_paste_%1.png").arg(QDateTime::currentMSecsSinceEpoch())
+            );
+
+            if (img.save(tempFile, "PNG")) {
+                m_pastedTempFilePath = tempFile;
+                m_imagePath->setText(tempFile);
+                m_statusLabel->setText("Pasted image from clipboard.");
+                return;
+            }
+        }
+    }
+
+    // 2. Copied file URL from file manager
+    if (mimeData->hasUrls()) {
+        const QList<QUrl> urls = mimeData->urls();
+        for (const QUrl& url : urls) {
+            const QString localFile = url.toLocalFile();
+            const QString suffix = QFileInfo(localFile).suffix().toLower();
+            if (suffix == "png" || suffix == "jpg" || suffix == "jpeg" || suffix == "webp") {
+                if (QFile::exists(localFile)) {
+                    setImagePath(localFile);
+                    m_statusLabel->setText("Pasted image file from clipboard.");
+                    return;
+                }
+            }
+        }
+    }
+
+    QMessageBox::information(
+        this,
+        "Paste Image",
+        "No image or image file found on the clipboard."
+    );
+}
+
+void MainWindow::cleanupPastedTempFile()
+{
+    if (!m_pastedTempFilePath.isEmpty()) {
+        if (QFile::exists(m_pastedTempFilePath)) {
+            QFile::remove(m_pastedTempFilePath);
+        }
+        m_pastedTempFilePath.clear();
+    }
+}
+
+void MainWindow::dragEnterEvent(QDragEnterEvent* event)
+{
+    if (m_mediaService.isProcessing()) {
+        event->ignore();
+        return;
+    }
+
+    if (event->mimeData()->hasUrls()) {
+        const QList<QUrl> urls = event->mimeData()->urls();
+        for (const QUrl& url : urls) {
+            const QString suffix = QFileInfo(url.toLocalFile()).suffix().toLower();
+            if (suffix == "png" || suffix == "jpg" || suffix == "jpeg" || suffix == "webp"
+                || suffix == "mp3" || suffix == "m4a") {
+                event->acceptProposedAction();
+                return;
+            }
+        }
+    }
+    event->ignore();
+}
+
+void MainWindow::dragMoveEvent(QDragMoveEvent* event)
+{
+    if (m_mediaService.isProcessing()) {
+        event->ignore();
+        return;
+    }
+
+    if (event->mimeData()->hasUrls()) {
+        event->acceptProposedAction();
+    } else {
+        event->ignore();
+    }
+}
+
+void MainWindow::dropEvent(QDropEvent* event)
+{
+    if (m_mediaService.isProcessing()) {
+        event->ignore();
+        return;
+    }
+
+    if (event->mimeData()->hasUrls()) {
+        const QList<QUrl> urls = event->mimeData()->urls();
+        for (const QUrl& url : urls) {
+            const QString localPath = url.toLocalFile();
+            if (localPath.isEmpty() || !QFile::exists(localPath)) {
+                continue;
+            }
+            const QString suffix = QFileInfo(localPath).suffix().toLower();
+            if (suffix == "png" || suffix == "jpg" || suffix == "jpeg" || suffix == "webp") {
+                setImagePath(localPath);
+            } else if (suffix == "mp3" || suffix == "m4a") {
+                setAudioPath(localPath);
+            }
+        }
+        event->acceptProposedAction();
+    }
+}
+
+void MainWindow::resizeEvent(QResizeEvent* event)
+{
+    QMainWindow::resizeEvent(event);
+    if (!m_loadedPixmap.isNull()) {
+        renderPreviewThumbnail();
+    }
+}
+
 void MainWindow::setUiBusy(bool busy)
 {
     m_createButton->setEnabled(!busy);
     m_cancelButton->setEnabled(busy);
     m_imageButton->setEnabled(!busy);
+    m_pasteButton->setEnabled(!busy);
     m_audioButton->setEnabled(!busy);
     m_outputButton->setEnabled(!busy);
 
@@ -326,11 +682,13 @@ void MainWindow::closeEvent(QCloseEvent* event)
 
         if (reply == QMessageBox::Yes) {
             m_mediaService.cancel();
+            cleanupPastedTempFile();
             event->accept();
         } else {
             event->ignore();
         }
     } else {
+        cleanupPastedTempFile();
         event->accept();
     }
 }

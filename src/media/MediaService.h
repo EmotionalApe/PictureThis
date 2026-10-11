@@ -28,6 +28,12 @@ public:
         QString* errorMessage = nullptr
     );
 
+    bool getMediaDuration(
+        const QString& filePath,
+        double& duration,
+        QString* errorMessage = nullptr
+    );
+
     bool isProcessing() const;
     void cancel();
 
@@ -43,11 +49,6 @@ private slots:
     void onStandardOutputLineReceived(const QString& line);
 
 private:
-    bool getMediaDuration(
-        const QString& filePath,
-        double& duration,
-        QString* errorMessage
-    );
 
     ProcessRunner& m_ffmpeg;
     ProcessRunner& m_ffprobe;
