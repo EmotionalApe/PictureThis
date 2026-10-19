@@ -26,6 +26,13 @@ public:
         QString* standardError = nullptr
     );
 
+    // Synchronous binary execution (for image/thumbnail extraction)
+    bool runBinary(
+        const QStringList& arguments,
+        QByteArray* standardOutput = nullptr,
+        QString* standardError = nullptr
+    );
+
     bool isRunning() const;
     void cancel();
 

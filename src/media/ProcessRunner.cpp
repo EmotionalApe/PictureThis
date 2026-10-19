@@ -68,6 +68,35 @@ bool ProcessRunner::run(
            process.exitCode() == 0;
 }
 
+bool ProcessRunner::runBinary(
+    const QStringList& arguments,
+    QByteArray* standardOutput,
+    QString* standardError)
+{
+    QProcess process;
+    process.start(m_executable, arguments);
+
+    if (!process.waitForStarted()) {
+        if (standardError) {
+            *standardError = process.errorString();
+        }
+        return false;
+    }
+
+    process.waitForFinished(10000);
+
+    if (standardOutput) {
+        *standardOutput = process.readAllStandardOutput();
+    }
+
+    if (standardError) {
+        *standardError = QString::fromUtf8(process.readAllStandardError());
+    }
+
+    return process.exitStatus() == QProcess::NormalExit &&
+           process.exitCode() == 0;
+}
+
 bool ProcessRunner::isRunning() const
 {
     return m_process.state() != QProcess::NotRunning;

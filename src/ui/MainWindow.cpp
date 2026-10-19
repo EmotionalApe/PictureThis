@@ -1,5 +1,6 @@
 #include "MainWindow.h"
 #include "ImageAudioWidget.h"
+#include "VideoTrimWidget.h"
 #include "../media/MediaService.h"
 
 #include <QCloseEvent>
@@ -14,11 +15,12 @@ MainWindow::MainWindow(
     : QMainWindow(parent),
       m_mediaService(mediaService),
       m_tabWidget(new QTabWidget(this)),
-      m_imageAudioWidget(new ImageAudioWidget(mediaService, this))
+      m_imageAudioWidget(new ImageAudioWidget(mediaService, this)),
+      m_videoTrimWidget(new VideoTrimWidget(mediaService, this))
 {
     setWindowTitle("Picture This");
-    resize(800, 520);
-    setMinimumSize(740, 460);
+    resize(840, 540);
+    setMinimumSize(780, 480);
 
     m_tabWidget->setStyleSheet(
         "QTabBar::tab {"
@@ -34,14 +36,8 @@ MainWindow::MainWindow(
     // Tab 1: Image + Audio -> MP4
     m_tabWidget->addTab(m_imageAudioWidget, "Image to Video");
 
-    // Tab 2: Video Trimming (Next Phase)
-    m_tabWidget->addTab(
-        createPlaceholderWidget(
-            "Video Trimming",
-            "Cut and export video segments with fast stream copy or accurate re-encoding.\n"
-        ),
-        "Trim Video"
-    );
+    // Tab 2: Video Trimming
+    m_tabWidget->addTab(m_videoTrimWidget, "Trim Video");
 
     // Tab 3: Video Combining (Subsequent Phase)
     m_tabWidget->addTab(
