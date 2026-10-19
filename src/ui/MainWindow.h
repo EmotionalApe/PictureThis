@@ -4,6 +4,7 @@
 
 class MediaService;
 class ImageAudioWidget;
+class VideoTrimWidget;
 class QTabWidget;
 class QCloseEvent;
 
@@ -27,4 +28,5 @@ private:
     MediaService& m_mediaService;
     QTabWidget* m_tabWidget;
     ImageAudioWidget* m_imageAudioWidget;
+    VideoTrimWidget* m_videoTrimWidget;
 };
