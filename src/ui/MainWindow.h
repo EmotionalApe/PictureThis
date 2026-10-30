@@ -5,6 +5,7 @@
 class MediaService;
 class ImageAudioWidget;
 class VideoTrimWidget;
+class VideoCombineWidget;
 class QTabWidget;
 class QCloseEvent;
 
@@ -22,6 +23,10 @@ public:
 protected:
     void closeEvent(QCloseEvent* event) override;
 
+private slots:
+    void onJobStarted();
+    void onJobStopped();
+
 private:
     QWidget* createPlaceholderWidget(const QString& title, const QString& description);
 
@@ -29,4 +34,5 @@ private:
     QTabWidget* m_tabWidget;
     ImageAudioWidget* m_imageAudioWidget;
     VideoTrimWidget* m_videoTrimWidget;
+    VideoCombineWidget* m_videoCombineWidget;
 };

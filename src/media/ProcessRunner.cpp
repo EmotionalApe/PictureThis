@@ -1,5 +1,9 @@
 #include "ProcessRunner.h"
 
+#if defined(Q_OS_WIN)
+#include <windows.h>
+#endif
+
 ProcessRunner::ProcessRunner(QString executable, QObject* parent)
     : QObject(parent),
       m_executable(std::move(executable)),
@@ -35,6 +39,8 @@ bool ProcessRunner::start(const QStringList& arguments)
     m_standardOutput.clear();
     m_standardError.clear();
 
+    // Keep stdin open so we can send 'q' for a graceful ffmpeg shutdown on cancel.
+    m_process.setProcessChannelMode(QProcess::SeparateChannels);
     m_process.start(m_executable, arguments);
     return true;
 }
@@ -108,16 +114,33 @@ void ProcessRunner::cancel()
         return;
     }
 
+    // Ask ffmpeg to stop gracefully by sending 'q' to its stdin.
+    // ffmpeg monitors stdin for this and will flush and close the output file cleanly.
+    m_process.write("q");
+    m_process.closeWriteChannel();
+
+    if (m_process.waitForFinished(3000)) {
+        // ffmpeg exited cleanly within 3 seconds — done.
+        return;
+    }
+
+    // ffmpeg didn't respond to 'q' in time — force-kill the entire process tree.
 #if defined(Q_OS_WIN)
-    // On Windows, console apps lack a message pump for WM_CLOSE, so terminate()
-    // does not stop them. kill() terminates the process immediately.
-    m_process.kill();
-    m_process.waitForFinished(300);
+    // taskkill /F /T kills the process AND all its children, which handles
+    // the case where ffmpeg has spawned child processes (e.g. sub-encoders).
+    const qint64 pid = m_process.processId();
+    if (pid > 0) {
+        QProcess::execute(
+            "taskkill",
+            {"/F", "/T", "/PID", QString::number(pid)}
+        );
+    }
+    m_process.waitForFinished(2000);
 #else
     m_process.terminate();
-    if (!m_process.waitForFinished(500)) {
+    if (!m_process.waitForFinished(1000)) {
         m_process.kill();
-        m_process.waitForFinished(300);
+        m_process.waitForFinished(1000);
     }
 #endif
 }

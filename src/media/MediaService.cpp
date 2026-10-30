@@ -2,12 +2,16 @@
 #include "ProcessRunner.h"
 
 #include <algorithm>
+#include <QCoreApplication>
+#include <QDateTime>
+#include <QDir>
 #include <QFile>
 #include <QFileInfo>
 #include <QJsonArray>
 #include <QJsonDocument>
 #include <QJsonObject>
 #include <QJsonValue>
+#include <QTextStream>
 #include <QThread>
 
 MediaService::MediaService(
@@ -160,6 +164,178 @@ bool MediaService::trimVideo(
     return true;
 }
 
+bool MediaService::combineVideos(
+    const QStringList& inputPaths,
+    const QString& outputPath,
+    bool forceReencode,
+    QString* errorMessage)
+{
+    if (m_isProcessing) {
+        if (errorMessage) {
+            *errorMessage = "A media job is already in progress.";
+        }
+        return false;
+    }
+
+    if (inputPaths.size() < 2) {
+        if (errorMessage) {
+            *errorMessage = "At least two video files are required to combine.";
+        }
+        return false;
+    }
+
+    for (const QString& path : inputPaths) {
+        if (!QFile::exists(path)) {
+            if (errorMessage) {
+                *errorMessage = QString("Input file does not exist: %1").arg(path);
+            }
+            return false;
+        }
+    }
+
+    // Probe metadata for all inputs
+    QList<VideoMetadata> metadatas;
+    metadatas.reserve(inputPaths.size());
+    double totalDuration = 0.0;
+
+    int maxArea = 0;
+    int targetWidth = 1920;
+    int targetHeight = 1080;
+
+    bool allMatching = true;
+    VideoMetadata firstMeta;
+
+    for (int i = 0; i < inputPaths.size(); ++i) {
+        VideoMetadata meta;
+        if (!getVideoMetadata(inputPaths[i], meta, errorMessage)) {
+            return false;
+        }
+        metadatas.append(meta);
+        totalDuration += meta.durationSeconds;
+
+        const int area = meta.width * meta.height;
+        if (area > maxArea) {
+            maxArea = area;
+            targetWidth = meta.width;
+            targetHeight = meta.height;
+        }
+
+        if (i == 0) {
+            firstMeta = meta;
+        } else {
+            if (meta.width != firstMeta.width ||
+                meta.height != firstMeta.height ||
+                meta.videoCodec != firstMeta.videoCodec ||
+                meta.audioCodec != firstMeta.audioCodec) {
+                allMatching = false;
+            }
+        }
+    }
+
+    // Ensure even canvas dimensions for H.264
+    targetWidth = (targetWidth + 1) & ~1;
+    targetHeight = (targetHeight + 1) & ~1;
+
+    QStringList arguments;
+    arguments << "-y" << "-progress" << "pipe:1" << "-nostats";
+
+    cleanupTemporaryFiles();
+
+    if (allMatching && !forceReencode) {
+        // Mode 1: Concat Demuxer (Fast Lossless Stream Copy)
+        const QString manifestName = QString("concat_%1_%2.txt")
+            .arg(QDateTime::currentMSecsSinceEpoch())
+            .arg(QCoreApplication::applicationPid());
+        const QString manifestPath = QDir::temp().filePath(manifestName);
+
+        QFile manifestFile(manifestPath);
+        if (!manifestFile.open(QIODevice::WriteOnly | QIODevice::Text)) {
+            if (errorMessage) {
+                *errorMessage = "Failed to create temporary concat manifest file.";
+            }
+            return false;
+        }
+
+        QTextStream outStream(&manifestFile);
+        for (const QString& path : inputPaths) {
+            QString escapedPath = QDir::fromNativeSeparators(path);
+            escapedPath.replace("'", "'\\''");
+            outStream << "file '" << escapedPath << "'\n";
+        }
+        manifestFile.close();
+
+        m_concatManifestPath = manifestPath;
+
+        arguments << "-f" << "concat"
+                  << "-safe" << "0"
+                  << "-i" << manifestPath
+                  << "-c" << "copy"
+                  << outputPath;
+    } else {
+        // Mode 2: Concat Filter Complex (Smart Re-encode Fallback)
+        for (const QString& path : inputPaths) {
+            arguments << "-i" << path;
+        }
+
+        QString filterGraph;
+        QString concatInputs;
+
+        for (int i = 0; i < inputPaths.size(); ++i) {
+            // Video stream normalization: scale to fit within canvas preserving aspect ratio, center pad
+            filterGraph += QString("[%1:v]scale=%2:%3:force_original_aspect_ratio=decrease,pad=%2:%3:(ow-iw)/2:(oh-ih)/2,setsar=1[v%1];")
+                .arg(i).arg(targetWidth).arg(targetHeight);
+
+            // Audio handling: normalize audio or generate silence if video has no audio
+            if (!metadatas[i].audioCodec.isEmpty()) {
+                filterGraph += QString("[%1:a]aformat=sample_fmts=fltp:sample_rates=44100:channel_layouts=stereo[a%1];")
+                    .arg(i);
+            } else {
+                const double dur = std::max(0.1, metadatas[i].durationSeconds);
+                filterGraph += QString("aevalsrc=0:d=%1:s=44100[a%1];")
+                    .arg(dur, 0, 'f', 3).arg(i);
+            }
+
+            concatInputs += QString("[v%1][a%1]").arg(i);
+        }
+
+        filterGraph += QString("%1concat=n=%2:v=1:a=1[outv][outa]")
+            .arg(concatInputs)
+            .arg(inputPaths.size());
+
+        arguments << "-filter_complex" << filterGraph
+                  << "-map" << "[outv]"
+                  << "-map" << "[outa]"
+                  << "-c:v" << "libx264"
+                  << "-crf" << "20"
+                  << "-pix_fmt" << "yuv420p"
+                  << "-color_range" << "tv"
+                  << "-c:a" << "aac"
+                  << "-b:a" << "128k"
+                  << outputPath;
+    }
+
+    m_isProcessing = true;
+    m_isCancelling = false;
+    m_currentJob = MediaJobType::VideoCombine;
+    m_targetDuration = std::max(0.001, totalDuration);
+    m_currentOutputPath = outputPath;
+
+    if (!m_ffmpeg.start(arguments)) {
+        m_isProcessing = false;
+        m_currentJob = MediaJobType::None;
+        m_targetDuration = 0.0;
+        cleanupTemporaryFiles();
+        if (errorMessage) {
+            *errorMessage = "Failed to start FFmpeg process.";
+        }
+        return false;
+    }
+
+    emit videoCombineStarted();
+    emit progressChanged(0);
+    return true;
+}
+
 bool MediaService::isProcessing() const
 {
     return m_isProcessing;
@@ -170,6 +346,16 @@ void MediaService::cancel()
     if (m_isProcessing && !m_isCancelling) {
         m_isCancelling = true;
         m_ffmpeg.cancel();
+    }
+}
+
+void MediaService::cleanupTemporaryFiles()
+{
+    if (!m_concatManifestPath.isEmpty()) {
+        if (QFile::exists(m_concatManifestPath)) {
+            QFile::remove(m_concatManifestPath);
+        }
+        m_concatManifestPath.clear();
     }
 }
 
@@ -200,6 +386,8 @@ void MediaService::handleJobCompletion(bool success, const QString& errorMessage
     m_currentJob = MediaJobType::None;
     m_targetDuration = 0.0;
 
+    cleanupTemporaryFiles();
+
     if (success) {
         emit progressChanged(100);
     }
@@ -208,6 +396,8 @@ void MediaService::handleJobCompletion(bool success, const QString& errorMessage
         emit videoCreationFinished(success, errorMessage);
     } else if (job == MediaJobType::VideoTrim) {
         emit videoTrimFinished(success, errorMessage);
+    } else if (job == MediaJobType::VideoCombine) {
+        emit videoCombineFinished(success, errorMessage);
     }
 }
 
@@ -218,6 +408,8 @@ void MediaService::handleJobCancellation()
     m_isCancelling = false;
     m_currentJob = MediaJobType::None;
     m_targetDuration = 0.0;
+
+    cleanupTemporaryFiles();
 
     // Clean up incomplete/corrupted output file with retry
     if (!m_currentOutputPath.isEmpty() && QFile::exists(m_currentOutputPath)) {
@@ -235,6 +427,8 @@ void MediaService::handleJobCancellation()
         emit videoCreationCancelled();
     } else if (job == MediaJobType::VideoTrim) {
         emit videoTrimCancelled();
+    } else if (job == MediaJobType::VideoCombine) {
+        emit videoCombineCancelled();
     }
 }
 

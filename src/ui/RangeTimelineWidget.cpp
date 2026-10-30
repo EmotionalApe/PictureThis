@@ -60,10 +60,12 @@ void RangeTimelineWidget::paintEvent(QPaintEvent* event)
     const int trackHeight = 10;
     const int trackWidth = std::max(10, w - 2 * trackMarginH);
 
+    const bool isDark = palette().color(QPalette::Window).lightness() < 128;
+
     // 1. Draw track background
     const QRectF trackRect(trackMarginH, trackY, trackWidth, trackHeight);
     painter.setPen(Qt::NoPen);
-    painter.setBrush(QColor(220, 224, 230)); // Subtle light-gray
+    painter.setBrush(isDark ? QColor(51, 65, 85) : QColor(220, 224, 230));
     painter.drawRoundedRect(trackRect, 5.0, 5.0);
 
     // 2. Draw active highlighted range
@@ -75,20 +77,19 @@ void RangeTimelineWidget::paintEvent(QPaintEvent* event)
         const double activeW = std::max(3.0, (endRatio - startRatio) * trackWidth);
 
         const QRectF activeRect(activeX, trackY, activeW, trackHeight);
-        painter.setBrush(QColor(59, 130, 246)); // Vibrant blue (#3b82f6)
+        painter.setBrush(QColor(13, 148, 136)); // Deep Emerald / Teal (#0d9488)
         painter.drawRoundedRect(activeRect, 5.0, 5.0);
 
-        // Draw start and end pin handles
-        painter.setPen(QPen(QColor(37, 99, 235), 2));
-        painter.setBrush(Qt::white);
-
+        // Draw start and end pin handles in matching teal theme
         const int handleRadius = 6;
+        painter.setPen(QPen(QColor(15, 118, 110), 2)); // #0f766e
+        painter.setBrush(Qt::white);
         painter.drawEllipse(QPointF(activeX, trackY + trackHeight / 2.0), handleRadius, handleRadius);
         painter.drawEllipse(QPointF(activeX + activeW, trackY + trackHeight / 2.0), handleRadius, handleRadius);
     }
 
     // 3. Draw text markers below track
-    painter.setPen(QColor(100, 116, 139));
+    painter.setPen(isDark ? QColor(148, 163, 184) : QColor(100, 116, 139));
     QFont font = painter.font();
     font.setPointSize(9);
     painter.setFont(font);
@@ -109,7 +110,7 @@ void RangeTimelineWidget::paintEvent(QPaintEvent* event)
         const QString centerStr = QString("Cut: %1").arg(formatTime(m_endTime - m_startTime));
         const int centerW = painter.fontMetrics().horizontalAdvance(centerStr);
         const int centerX = (w - centerW) / 2;
-        painter.setPen(QColor(30, 41, 59));
+        painter.setPen(isDark ? QColor(241, 245, 249) : QColor(30, 41, 59));
         painter.drawText(centerX, textY, centerStr);
     }
 }

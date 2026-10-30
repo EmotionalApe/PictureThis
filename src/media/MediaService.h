@@ -19,7 +19,8 @@ struct VideoMetadata {
 enum class MediaJobType {
     None,
     ImageToVideo,
-    VideoTrim
+    VideoTrim,
+    VideoCombine
 };
 
 class MediaService : public QObject
@@ -50,6 +51,13 @@ public:
         double endTime,
         const QString& outputPath,
         bool accurateReencode,
+        QString* errorMessage = nullptr
+    );
+
+    bool combineVideos(
+        const QStringList& inputPaths,
+        const QString& outputPath,
+        bool forceReencode,
         QString* errorMessage = nullptr
     );
 
@@ -86,6 +94,11 @@ signals:
     void videoTrimCancelled();
     void videoTrimFinished(bool success, const QString& errorMessage);
 
+    // Video Combining signals
+    void videoCombineStarted();
+    void videoCombineCancelled();
+    void videoCombineFinished(bool success, const QString& errorMessage);
+
     // Shared progress signal
     void progressChanged(int percentage);
 
@@ -97,6 +110,7 @@ private slots:
 private:
     void handleJobCompletion(bool success, const QString& errorMessage);
     void handleJobCancellation();
+    void cleanupTemporaryFiles();
 
     ProcessRunner& m_ffmpeg;
     ProcessRunner& m_ffprobe;
@@ -105,4 +119,5 @@ private:
     MediaJobType m_currentJob = MediaJobType::None;
     double m_targetDuration = 0.0;
     QString m_currentOutputPath;
+    QString m_concatManifestPath;
 };

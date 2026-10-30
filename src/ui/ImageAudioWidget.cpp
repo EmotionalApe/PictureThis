@@ -60,7 +60,7 @@ ImageAudioWidget::ImageAudioWidget(
     leftLayout->setSpacing(8);
 
     auto* previewHeading = new QLabel("Image Preview", this);
-    previewHeading->setStyleSheet("font-weight: bold; font-size: 13px;");
+    previewHeading->setStyleSheet("font-weight: bold; font-size: 13px; color: palette(window-text);");
     leftLayout->addWidget(previewHeading);
 
     m_previewLabel->setAlignment(Qt::AlignCenter);
@@ -74,7 +74,7 @@ ImageAudioWidget::ImageAudioWidget(
     leftLayout->addWidget(m_previewLabel, 1);
 
     m_imageInfoLabel->setAlignment(Qt::AlignCenter);
-    m_imageInfoLabel->setStyleSheet("color: #666666; font-size: 11px;");
+    m_imageInfoLabel->setStyleSheet("color: palette(window-text); font-size: 11px;");
     m_imageInfoLabel->setWordWrap(true);
     leftLayout->addWidget(m_imageInfoLabel);
 
@@ -86,7 +86,7 @@ ImageAudioWidget::ImageAudioWidget(
 
     // Image Input Row
     auto* imageLabel = new QLabel("Image", this);
-    imageLabel->setStyleSheet("font-weight: bold;");
+    imageLabel->setStyleSheet("font-weight: bold; color: palette(window-text);");
     auto* imageLayout = new QHBoxLayout();
     imageLayout->addWidget(m_imagePath);
     imageLayout->addWidget(m_imageButton);
@@ -95,16 +95,16 @@ ImageAudioWidget::ImageAudioWidget(
 
     // Audio Input Row
     auto* audioLabel = new QLabel("Audio", this);
-    audioLabel->setStyleSheet("font-weight: bold;");
+    audioLabel->setStyleSheet("font-weight: bold; color: palette(window-text);");
     auto* audioLayout = new QHBoxLayout();
     audioLayout->addWidget(m_audioPath);
     audioLayout->addWidget(m_audioButton);
 
-    m_audioInfoLabel->setStyleSheet("color: #666666; font-size: 11px;");
+    m_audioInfoLabel->setStyleSheet("color: palette(window-text); font-size: 11px;");
 
     // Output Input Row
     auto* outputLabel = new QLabel("Output", this);
-    outputLabel->setStyleSheet("font-weight: bold;");
+    outputLabel->setStyleSheet("font-weight: bold; color: palette(window-text);");
     auto* outputLayout = new QHBoxLayout();
     outputLayout->addWidget(m_outputPath);
     outputLayout->addWidget(m_outputButton);
@@ -136,9 +136,9 @@ ImageAudioWidget::ImageAudioWidget(
     rightLayout->addWidget(m_progressBar);
     rightLayout->addWidget(m_statusLabel);
 
-    // Assemble root layout
+    // Assemble root layout (balanced 1:1 split matching all tabs)
     rootLayout->addWidget(leftWidget, 1);
-    rootLayout->addWidget(rightWidget, 2);
+    rootLayout->addWidget(rightWidget, 1);
 
     // Wire up events and connections
     connect(m_imageButton, &QPushButton::clicked,
