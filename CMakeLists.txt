@@ -24,6 +24,8 @@ qt_add_executable(PictureThis
     src/ui/RangeTimelineWidget.h
     src/ui/VideoTrimWidget.cpp
     src/ui/VideoTrimWidget.h
+    src/ui/VideoCombineWidget.cpp
+    src/ui/VideoCombineWidget.h
 
     src/media/ProcessRunner.cpp
     src/media/ProcessRunner.h

@@ -70,7 +70,7 @@ VideoTrimWidget::VideoTrimWidget(
     leftLayout->setSpacing(10);
 
     auto* previewHeading = new QLabel("Video Preview & Timeline", this);
-    previewHeading->setStyleSheet("font-weight: bold; font-size: 13px;");
+    previewHeading->setStyleSheet("font-weight: bold; font-size: 13px; color: palette(window-text);");
     leftLayout->addWidget(previewHeading);
 
     // Placeholder Card (shown when no video is loaded)
@@ -104,10 +104,10 @@ VideoTrimWidget::VideoTrimWidget(
     m_startThumbnailLabel->setMinimumSize(130, 110);
     m_startThumbnailLabel->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Expanding);
     m_startThumbnailLabel->setStyleSheet(
-        "border: 1px solid #aaaaaa; border-radius: 6px; background-color: rgba(0, 0, 0, 0.04);"
+        "border: 1px solid palette(mid); border-radius: 6px; background-color: rgba(128, 128, 128, 0.08);"
     );
     m_startCaptionLabel->setAlignment(Qt::AlignCenter);
-    m_startCaptionLabel->setStyleSheet("font-size: 11px; font-weight: bold; color: #3b82f6;");
+    m_startCaptionLabel->setStyleSheet("font-size: 11px; font-weight: bold; color: #0d9488;");
     startBoxLayout->addWidget(m_startThumbnailLabel, 1);
     startBoxLayout->addWidget(m_startCaptionLabel);
 
@@ -121,10 +121,10 @@ VideoTrimWidget::VideoTrimWidget(
     m_endThumbnailLabel->setMinimumSize(130, 110);
     m_endThumbnailLabel->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Expanding);
     m_endThumbnailLabel->setStyleSheet(
-        "border: 1px solid #aaaaaa; border-radius: 6px; background-color: rgba(0, 0, 0, 0.04);"
+        "border: 1px solid palette(mid); border-radius: 6px; background-color: rgba(128, 128, 128, 0.08);"
     );
     m_endCaptionLabel->setAlignment(Qt::AlignCenter);
-    m_endCaptionLabel->setStyleSheet("font-size: 11px; font-weight: bold; color: #3b82f6;");
+    m_endCaptionLabel->setStyleSheet("font-size: 11px; font-weight: bold; color: #0d9488;");
     endBoxLayout->addWidget(m_endThumbnailLabel, 1);
     endBoxLayout->addWidget(m_endCaptionLabel);
 
@@ -137,7 +137,7 @@ VideoTrimWidget::VideoTrimWidget(
     // Metadata Banner
     m_metadataLabel->setAlignment(Qt::AlignCenter);
     m_metadataLabel->setStyleSheet(
-        "color: #475569; font-size: 11px; padding: 4px 8px; background: rgba(0,0,0,0.03); border-radius: 4px;"
+        "color: palette(window-text); font-size: 11px; padding: 4px 8px; background: rgba(128, 128, 128, 0.12); border-radius: 4px;"
     );
     m_metadataLabel->setWordWrap(true);
     leftLayout->addWidget(m_metadataLabel);
@@ -153,7 +153,7 @@ VideoTrimWidget::VideoTrimWidget(
 
     // Video Input
     auto* videoLabel = new QLabel("Video File", this);
-    videoLabel->setStyleSheet("font-weight: bold;");
+    videoLabel->setStyleSheet("font-weight: bold; color: palette(window-text);");
     auto* videoLayout = new QHBoxLayout();
     videoLayout->addWidget(m_videoPath);
     videoLayout->addWidget(m_videoButton);
@@ -162,14 +162,16 @@ VideoTrimWidget::VideoTrimWidget(
 
     // Time Selection Group
     auto* timeHeading = new QLabel("Time Range", this);
-    timeHeading->setStyleSheet("font-weight: bold; margin-top: 4px;");
+    timeHeading->setStyleSheet("font-weight: bold; margin-top: 4px; color: palette(window-text);");
     rightLayout->addWidget(timeHeading);
 
     // Start Time Row
     m_startTimeEdit->setDisplayFormat("HH:mm:ss");
     m_startTimeEdit->setTime(QTime(0, 0, 0));
     auto* startRow = new QHBoxLayout();
-    startRow->addWidget(new QLabel("Start:", this));
+    auto* startRowLabel = new QLabel("Start:", this);
+    startRowLabel->setStyleSheet("color: #0d9488; font-weight: bold;");
+    startRow->addWidget(startRowLabel);
     startRow->addWidget(m_startTimeEdit, 1);
     startRow->addWidget(m_startFromBeginningButton);
     m_startFromBeginningButton->setToolTip("Reset start to 00:00:00");
@@ -179,14 +181,16 @@ VideoTrimWidget::VideoTrimWidget(
     m_endTimeEdit->setDisplayFormat("HH:mm:ss");
     m_endTimeEdit->setTime(QTime(0, 0, 0));
     auto* endRow = new QHBoxLayout();
-    endRow->addWidget(new QLabel("End:  ", this));
+    auto* endRowLabel = new QLabel("End:  ", this);
+    endRowLabel->setStyleSheet("color: #0d9488; font-weight: bold;");
+    endRow->addWidget(endRowLabel);
     endRow->addWidget(m_endTimeEdit, 1);
     endRow->addWidget(m_endToEndButton);
     m_endToEndButton->setToolTip("Reset end to full video duration");
     rightLayout->addLayout(endRow);
 
     // Summary & Validation
-    m_trimSummaryLabel->setStyleSheet("font-weight: 500; font-size: 12px; color: #1e293b;");
+    m_trimSummaryLabel->setStyleSheet("font-weight: 500; font-size: 12px; color: palette(window-text);");
     rightLayout->addWidget(m_trimSummaryLabel);
 
     // Mode Toggle
@@ -195,7 +199,7 @@ VideoTrimWidget::VideoTrimWidget(
 
     // Output Location
     auto* outputLabel = new QLabel("Output Destination", this);
-    outputLabel->setStyleSheet("font-weight: bold; margin-top: 4px;");
+    outputLabel->setStyleSheet("font-weight: bold; margin-top: 4px; color: palette(window-text);");
     auto* outputLayout = new QHBoxLayout();
     outputLayout->addWidget(m_outputPath);
     outputLayout->addWidget(m_outputButton);
@@ -416,7 +420,7 @@ void VideoTrimWidget::updateValidationAndSummary()
 {
     if (!m_videoLoaded) {
         m_trimSummaryLabel->setText("No video loaded");
-        m_trimSummaryLabel->setStyleSheet("color: #64748b;");
+        m_trimSummaryLabel->setStyleSheet("color: palette(placeholder-text);");
         m_trimButton->setEnabled(false);
         return;
     }
@@ -436,7 +440,7 @@ void VideoTrimWidget::updateValidationAndSummary()
         QString("Selected: %1 (from %2 to %3)")
             .arg(formatDuration(cutDuration), formatDuration(startSec), formatDuration(endSec))
     );
-    m_trimSummaryLabel->setStyleSheet("color: #0f172a; font-weight: 500;");
+    m_trimSummaryLabel->setStyleSheet("color: palette(window-text); font-weight: 500;");
     m_trimButton->setEnabled(!m_mediaService.isProcessing());
 }
 
