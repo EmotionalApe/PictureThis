@@ -2,14 +2,18 @@
 #include "ImageAudioWidget.h"
 #include "VideoTrimWidget.h"
 #include "VideoCombineWidget.h"
+#include "SettingsDialog.h"
 #include "../media/MediaService.h"
+#include "../media/ExecutableLocator.h"
 
 #include <QCloseEvent>
 #include <QLabel>
 #include <QMessageBox>
+#include <QPushButton>
 #include <QTabBar>
 #include <QTabWidget>
 #include <QVBoxLayout>
+#include <QHBoxLayout>
 
 MainWindow::MainWindow(
     MediaService& mediaService,
@@ -58,7 +62,36 @@ MainWindow::MainWindow(
     // Tab 3: Video Combining
     m_tabWidget->addTab(m_videoCombineWidget, "Combine Videos");
 
-    setCentralWidget(m_tabWidget);
+    // Top-right corner settings button
+    m_settingsBtn = new QPushButton("⚙ Settings", this);
+    m_settingsBtn->setCursor(Qt::PointingHandCursor);
+    m_settingsBtn->setStyleSheet(
+        "QPushButton {"
+        "    padding: 4px 10px;"
+        "    font-size: 11px;"
+        "    font-weight: 500;"
+        "    border: 1px solid palette(mid);"
+        "    border-radius: 4px;"
+        "    margin: 4px 8px;"
+        "    background-color: transparent;"
+        "}"
+        "QPushButton:hover {"
+        "    background-color: rgba(13, 148, 136, 0.1);"
+        "    color: #0d9488;"
+        "}"
+    );
+    connect(m_settingsBtn, &QPushButton::clicked, this, &MainWindow::onOpenSettings);
+    m_tabWidget->setCornerWidget(m_settingsBtn, Qt::TopRightCorner);
+
+    auto* centralContainer = new QWidget(this);
+    auto* containerLayout = new QVBoxLayout(centralContainer);
+    containerLayout->setContentsMargins(0, 0, 0, 0);
+    containerLayout->setSpacing(0);
+
+    m_alertBanner = createAlertBanner();
+    containerLayout->addWidget(m_alertBanner);
+    containerLayout->addWidget(m_tabWidget, 1);
+    setCentralWidget(centralContainer);
 
     // Disable the inactive tabs while any job is running, re-enable when done.
     connect(&mediaService, &MediaService::videoCreationStarted,  this, &MainWindow::onJobStarted);
@@ -71,10 +104,16 @@ MainWindow::MainWindow(
     connect(&mediaService, &MediaService::videoCreationCancelled, this, &MainWindow::onJobStopped);
     connect(&mediaService, &MediaService::videoTrimCancelled,     this, &MainWindow::onJobStopped);
     connect(&mediaService, &MediaService::videoCombineCancelled,  this, &MainWindow::onJobStopped);
+
+    checkToolStatus();
 }
 
 void MainWindow::onJobStarted()
 {
+    if (m_settingsBtn) {
+        m_settingsBtn->setEnabled(false);
+    }
+
     const int active = m_tabWidget->currentIndex();
     QTabBar* bar = m_tabWidget->tabBar();
     for (int i = 0; i < m_tabWidget->count(); ++i) {
@@ -89,12 +128,82 @@ void MainWindow::onJobStarted()
 
 void MainWindow::onJobStopped()
 {
+    if (m_settingsBtn) {
+        m_settingsBtn->setEnabled(true);
+    }
+
     QTabBar* bar = m_tabWidget->tabBar();
     for (int i = 0; i < m_tabWidget->count(); ++i) {
         m_tabWidget->setTabEnabled(i, true);
         bar->setTabToolTip(i, "");
     }
     bar->unsetCursor();
+}
+
+QWidget* MainWindow::createAlertBanner()
+{
+    auto* banner = new QWidget(this);
+    banner->setStyleSheet(
+        "QWidget {"
+        "    background-color: #fef3c7;"
+        "    border-bottom: 1px solid #f59e0b;"
+        "}"
+    );
+
+    auto* layout = new QHBoxLayout(banner);
+    layout->setContentsMargins(16, 8, 16, 8);
+    layout->setSpacing(12);
+
+    m_alertLabel = new QLabel(banner);
+    m_alertLabel->setStyleSheet("color: #92400e; font-weight: 500; font-size: 12px;");
+    m_alertLabel->setWordWrap(true);
+
+    auto* configBtn = new QPushButton("Configure Tools...", banner);
+    configBtn->setCursor(Qt::PointingHandCursor);
+    configBtn->setStyleSheet(
+        "QPushButton {"
+        "    background-color: #b45309;"
+        "    color: white;"
+        "    font-weight: bold;"
+        "    padding: 4px 12px;"
+        "    border-radius: 4px;"
+        "    font-size: 11px;"
+        "}"
+        "QPushButton:hover { background-color: #92400e; }"
+    );
+    connect(configBtn, &QPushButton::clicked, this, &MainWindow::onOpenSettings);
+
+    layout->addWidget(m_alertLabel, 1);
+    layout->addWidget(configBtn);
+
+    banner->setVisible(false);
+    return banner;
+}
+
+void MainWindow::checkToolStatus()
+{
+    const ToolStatus ffmpeg = ExecutableLocator::locateFfmpeg();
+    const ToolStatus ffprobe = ExecutableLocator::locateFfprobe();
+
+    if (!ffmpeg.isValid && !ffprobe.isValid) {
+        m_alertLabel->setText("⚠️ FFmpeg and FFprobe were not found on this system. Media operations are unavailable.");
+        m_alertBanner->setVisible(true);
+    } else if (!ffmpeg.isValid) {
+        m_alertLabel->setText("⚠️ FFmpeg was not found. Video encoding and creation features are unavailable.");
+        m_alertBanner->setVisible(true);
+    } else if (!ffprobe.isValid) {
+        m_alertLabel->setText("⚠️ FFprobe was not found. Media metadata probing and thumbnail extraction are unavailable.");
+        m_alertBanner->setVisible(true);
+    } else {
+        m_alertBanner->setVisible(false);
+    }
+}
+
+void MainWindow::onOpenSettings()
+{
+    SettingsDialog dialog(m_mediaService, this);
+    connect(&dialog, &SettingsDialog::settingsSaved, this, &MainWindow::checkToolStatus);
+    dialog.exec();
 }
 
 QWidget* MainWindow::createPlaceholderWidget(const QString& title, const QString& description)
