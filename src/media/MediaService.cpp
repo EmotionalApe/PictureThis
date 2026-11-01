@@ -336,6 +336,88 @@ bool MediaService::combineVideos(
     return true;
 }
 
+bool MediaService::exportGif(
+    const QString& inputPath,
+    double startTime,
+    double endTime,
+    const QString& outputPath,
+    const GifOptions& options,
+    QString* errorMessage)
+{
+    if (m_isProcessing) {
+        if (errorMessage) {
+            *errorMessage = "A media job is already in progress.";
+        }
+        return false;
+    }
+
+    if (inputPath.isEmpty() || !QFile::exists(inputPath)) {
+        if (errorMessage) {
+            *errorMessage = "Input video file does not exist.";
+        }
+        return false;
+    }
+
+    if (outputPath.isEmpty()) {
+        if (errorMessage) {
+            *errorMessage = "Output path cannot be empty.";
+        }
+        return false;
+    }
+
+    if (startTime < 0.0 || endTime <= startTime) {
+        if (errorMessage) {
+            *errorMessage = "Invalid start or end timestamp for GIF export.";
+        }
+        return false;
+    }
+
+    const int fps = (options.fps > 0) ? options.fps : 15;
+
+    QString filterComplex;
+    if (options.targetWidth > 0) {
+        filterComplex = QString("[0:v] fps=%1,scale=%2:-2:flags=lanczos,split [a][b]; "
+                                "[a] palettegen=reserve_transparent=0 [p]; "
+                                "[b][p] paletteuse=dither=bayer:bayer_scale=5")
+                            .arg(fps)
+                            .arg(options.targetWidth);
+    } else {
+        filterComplex = QString("[0:v] fps=%1,scale='trunc(iw/2)*2:trunc(ih/2)*2':flags=lanczos,split [a][b]; "
+                                "[a] palettegen=reserve_transparent=0 [p]; "
+                                "[b][p] paletteuse=dither=bayer:bayer_scale=5")
+                            .arg(fps);
+    }
+
+    QStringList arguments;
+    arguments << "-y" << "-progress" << "pipe:1" << "-nostats"
+              << "-ss" << QString::number(startTime, 'f', 6)
+              << "-to" << QString::number(endTime, 'f', 6)
+              << "-i" << inputPath
+              << "-filter_complex" << filterComplex
+              << "-loop" << (options.infiniteLoop ? "0" : "-1")
+              << outputPath;
+
+    m_isProcessing = true;
+    m_isCancelling = false;
+    m_currentJob = MediaJobType::GifExport;
+    m_targetDuration = std::max(0.001, endTime - startTime);
+    m_currentOutputPath = outputPath;
+
+    if (!m_ffmpeg.start(arguments)) {
+        m_isProcessing = false;
+        m_currentJob = MediaJobType::None;
+        m_targetDuration = 0.0;
+        if (errorMessage) {
+            *errorMessage = "Failed to start FFmpeg process.";
+        }
+        return false;
+    }
+
+    emit gifExportStarted();
+    emit progressChanged(0);
+    return true;
+}
+
 bool MediaService::isProcessing() const
 {
     return m_isProcessing;
@@ -398,6 +480,8 @@ void MediaService::handleJobCompletion(bool success, const QString& errorMessage
         emit videoTrimFinished(success, errorMessage);
     } else if (job == MediaJobType::VideoCombine) {
         emit videoCombineFinished(success, errorMessage);
+    } else if (job == MediaJobType::GifExport) {
+        emit gifExportFinished(success, errorMessage);
     }
 }
 
@@ -429,6 +513,8 @@ void MediaService::handleJobCancellation()
         emit videoTrimCancelled();
     } else if (job == MediaJobType::VideoCombine) {
         emit videoCombineCancelled();
+    } else if (job == MediaJobType::GifExport) {
+        emit gifExportCancelled();
     }
 }
 

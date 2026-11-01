@@ -26,8 +26,8 @@ MainWindow::MainWindow(
       m_videoCombineWidget(new VideoCombineWidget(mediaService, this))
 {
     setWindowTitle("Picture This");
-    resize(840, 540);
-    setMinimumSize(780, 480);
+    resize(980, 600);
+    setMinimumSize(860, 520);
 
     m_tabWidget->setStyleSheet(
         "QTabBar::tab {"
@@ -97,13 +97,16 @@ MainWindow::MainWindow(
     connect(&mediaService, &MediaService::videoCreationStarted,  this, &MainWindow::onJobStarted);
     connect(&mediaService, &MediaService::videoTrimStarted,      this, &MainWindow::onJobStarted);
     connect(&mediaService, &MediaService::videoCombineStarted,   this, &MainWindow::onJobStarted);
+    connect(&mediaService, &MediaService::gifExportStarted,      this, &MainWindow::onJobStarted);
 
     connect(&mediaService, &MediaService::videoCreationFinished,  this, [this](bool, const QString&) { onJobStopped(); });
     connect(&mediaService, &MediaService::videoTrimFinished,      this, [this](bool, const QString&) { onJobStopped(); });
     connect(&mediaService, &MediaService::videoCombineFinished,   this, [this](bool, const QString&) { onJobStopped(); });
+    connect(&mediaService, &MediaService::gifExportFinished,      this, [this](bool, const QString&) { onJobStopped(); });
     connect(&mediaService, &MediaService::videoCreationCancelled, this, &MainWindow::onJobStopped);
     connect(&mediaService, &MediaService::videoTrimCancelled,     this, &MainWindow::onJobStopped);
     connect(&mediaService, &MediaService::videoCombineCancelled,  this, &MainWindow::onJobStopped);
+    connect(&mediaService, &MediaService::gifExportCancelled,    this, &MainWindow::onJobStopped);
 
     checkToolStatus();
 }

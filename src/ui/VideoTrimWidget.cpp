@@ -21,6 +21,8 @@
 #include <QResizeEvent>
 #include <QTimeEdit>
 #include <QCheckBox>
+#include <QComboBox>
+#include <QGridLayout>
 #include <QTimer>
 #include <QUrl>
 #include <QVBoxLayout>
@@ -45,7 +47,13 @@ VideoTrimWidget::VideoTrimWidget(
       m_endTimeEdit(new QTimeEdit(this)),
       m_endToEndButton(new QPushButton("To End", this)),
       m_trimSummaryLabel(new QLabel("Trim Duration: 00:00", this)),
+      m_formatComboBox(new QComboBox(this)),
+      m_mp4OptionsWidget(new QWidget(this)),
       m_reencodeCheckBox(new QCheckBox("Accurate re-encode (frame-exact cut, slower)", this)),
+      m_gifOptionsWidget(new QWidget(this)),
+      m_gifFpsComboBox(new QComboBox(this)),
+      m_gifResolutionComboBox(new QComboBox(this)),
+      m_gifLoopCheckBox(new QCheckBox("Infinite loop", this)),
       m_outputPath(new QLineEdit(this)),
       m_outputButton(new QPushButton("Browse...", this)),
       m_trimButton(new QPushButton("Trim Video", this)),
@@ -193,9 +201,63 @@ VideoTrimWidget::VideoTrimWidget(
     m_trimSummaryLabel->setStyleSheet("font-weight: 500; font-size: 12px; color: palette(window-text);");
     rightLayout->addWidget(m_trimSummaryLabel);
 
-    // Mode Toggle
+    // Export Format Selection
+    auto* formatLabel = new QLabel("Export Format", this);
+    formatLabel->setStyleSheet("font-weight: bold; margin-top: 4px; color: palette(window-text);");
+    rightLayout->addWidget(formatLabel);
+
+    m_formatComboBox->addItem("MP4 Video (.mp4)", "mp4");
+    m_formatComboBox->addItem("Animated GIF (.gif)", "gif");
+    rightLayout->addWidget(m_formatComboBox);
+
+    // MP4 Options Container
+    auto* mp4Layout = new QVBoxLayout(m_mp4OptionsWidget);
+    mp4Layout->setContentsMargins(0, 0, 0, 0);
     m_reencodeCheckBox->setToolTip("Use frame-accurate re-encoding instead of fast stream copy.");
-    rightLayout->addWidget(m_reencodeCheckBox);
+    mp4Layout->addWidget(m_reencodeCheckBox);
+    rightLayout->addWidget(m_mp4OptionsWidget);
+
+    // GIF Options Container
+    auto* gifLayout = new QVBoxLayout(m_gifOptionsWidget);
+    gifLayout->setContentsMargins(0, 0, 0, 0);
+    gifLayout->setSpacing(8);
+
+    auto* gifGrid = new QGridLayout();
+    gifGrid->setContentsMargins(0, 0, 0, 0);
+    gifGrid->setHorizontalSpacing(12);
+    gifGrid->setVerticalSpacing(8);
+
+    // Frame rate row
+    auto* fpsLabel = new QLabel("Frame Rate:", m_gifOptionsWidget);
+    fpsLabel->setStyleSheet("font-size: 11px; font-weight: bold; color: palette(window-text);");
+    m_gifFpsComboBox->addItem("10 fps (Smallest file)", 10);
+    m_gifFpsComboBox->addItem("15 fps (Recommended)", 15);
+    m_gifFpsComboBox->addItem("24 fps (Smooth motion)", 24);
+    m_gifFpsComboBox->addItem("30 fps (Maximum fidelity)", 30);
+    m_gifFpsComboBox->setCurrentIndex(1); // 15 fps default
+    gifGrid->addWidget(fpsLabel, 0, 0);
+    gifGrid->addWidget(m_gifFpsComboBox, 0, 1);
+
+    // Resolution row
+    auto* resLabel = new QLabel("Resolution:", m_gifOptionsWidget);
+    resLabel->setStyleSheet("font-size: 11px; font-weight: bold; color: palette(window-text);");
+    m_gifResolutionComboBox->addItem("360p width (Small)", 360);
+    m_gifResolutionComboBox->addItem("480p width (Standard / Chat)", 480);
+    m_gifResolutionComboBox->addItem("720p width (HD)", 720);
+    m_gifResolutionComboBox->addItem("Original resolution", 0);
+    m_gifResolutionComboBox->setCurrentIndex(1); // 480p default
+    gifGrid->addWidget(resLabel, 1, 0);
+    gifGrid->addWidget(m_gifResolutionComboBox, 1, 1);
+
+    gifGrid->setColumnStretch(1, 1);
+    gifLayout->addLayout(gifGrid);
+
+    m_gifLoopCheckBox->setChecked(true);
+    m_gifLoopCheckBox->setToolTip("Loop animation indefinitely (recommended for web and messaging apps).");
+    gifLayout->addWidget(m_gifLoopCheckBox);
+
+    m_gifOptionsWidget->setVisible(false);
+    rightLayout->addWidget(m_gifOptionsWidget);
 
     // Output Location
     auto* outputLabel = new QLabel("Output Destination", this);
@@ -257,6 +319,9 @@ VideoTrimWidget::VideoTrimWidget(
     connect(m_thumbnailTimer, &QTimer::timeout,
             this, &VideoTrimWidget::onThumbnailDebounceTimeout);
 
+    connect(m_formatComboBox, QOverload<int>::of(&QComboBox::currentIndexChanged),
+            this, &VideoTrimWidget::onFormatChanged);
+
     connect(&m_mediaService, &MediaService::videoTrimStarted,
             this, &VideoTrimWidget::onVideoTrimStarted);
 
@@ -268,6 +333,15 @@ VideoTrimWidget::VideoTrimWidget(
 
     connect(&m_mediaService, &MediaService::videoTrimFinished,
             this, &VideoTrimWidget::onVideoTrimFinished);
+
+    connect(&m_mediaService, &MediaService::gifExportStarted,
+            this, &VideoTrimWidget::onGifExportStarted);
+
+    connect(&m_mediaService, &MediaService::gifExportCancelled,
+            this, &VideoTrimWidget::onGifExportCancelled);
+
+    connect(&m_mediaService, &MediaService::gifExportFinished,
+            this, &VideoTrimWidget::onGifExportFinished);
 
     updateValidationAndSummary();
 }
@@ -288,11 +362,16 @@ void VideoTrimWidget::chooseVideo()
 
 void VideoTrimWidget::chooseOutput()
 {
+    const bool isGif = (m_formatComboBox->currentIndex() == 1);
+    const QString defaultName = isGif ? "trimmed.gif" : "trimmed.mp4";
+    const QString filter = isGif ? "Animated GIF (*.gif);;All Files (*.*)"
+                                 : "MP4 Video (*.mp4);;All Files (*.*)";
+
     const QString path = QFileDialog::getSaveFileName(
         this,
-        "Choose Output",
-        m_outputPath->text().trimmed().isEmpty() ? "trimmed.mp4" : m_outputPath->text().trimmed(),
-        "MP4 Video (*.mp4);;All Files (*.*)"
+        isGif ? "Choose Output GIF" : "Choose Output",
+        m_outputPath->text().trimmed().isEmpty() ? defaultName : m_outputPath->text().trimmed(),
+        filter
     );
 
     if (!path.isEmpty()) {
@@ -369,8 +448,10 @@ void VideoTrimWidget::loadVideo(const QString& path)
 
     // Auto-suggest output path if empty or default
     const QFileInfo fileInfo(path);
+    const bool isGif = (m_formatComboBox->currentIndex() == 1);
+    const QString ext = isGif ? "gif" : "mp4";
     const QString suggestedOut = fileInfo.dir().filePath(
-        QString("%1_trimmed.%2").arg(fileInfo.completeBaseName(), fileInfo.suffix())
+        QString("%1_trimmed.%2").arg(fileInfo.completeBaseName(), ext)
     );
     m_outputPath->setText(suggestedOut);
 
@@ -572,6 +653,23 @@ void VideoTrimWidget::dropEvent(QDropEvent* event)
     }
 }
 
+void VideoTrimWidget::onFormatChanged(int index)
+{
+    const bool isGif = (index == 1);
+    m_mp4OptionsWidget->setVisible(!isGif);
+    m_gifOptionsWidget->setVisible(isGif);
+    m_trimButton->setText(isGif ? "Export GIF" : "Trim Video");
+
+    // Automatically update the suggested output extension if an output path exists
+    QString currentOut = m_outputPath->text().trimmed();
+    if (!currentOut.isEmpty()) {
+        const QFileInfo fi(currentOut);
+        const QString targetExt = isGif ? "gif" : "mp4";
+        const QString newOut = fi.dir().filePath(fi.completeBaseName() + "." + targetExt);
+        m_outputPath->setText(newOut);
+    }
+}
+
 void VideoTrimWidget::trimVideo()
 {
     const QString inputPath = m_videoPath->text().trimmed();
@@ -608,27 +706,51 @@ void VideoTrimWidget::trimVideo()
         return;
     }
 
-    const bool accurateReencode = m_reencodeCheckBox->isChecked();
-
+    const bool isGif = (m_formatComboBox->currentIndex() == 1);
     QString errorMsg;
-    const bool started = m_mediaService.trimVideo(
-        inputPath,
-        startSec,
-        endSec,
-        outputPath,
-        accurateReencode,
-        &errorMsg
-    );
 
-    if (!started) {
-        m_statusLabel->setText("Failed to start trimming.");
-        QMessageBox::critical(this, "Trimming Failed", errorMsg);
+    if (isGif) {
+        GifOptions options;
+        options.fps = m_gifFpsComboBox->currentData().toInt();
+        options.targetWidth = m_gifResolutionComboBox->currentData().toInt();
+        options.infiniteLoop = m_gifLoopCheckBox->isChecked();
+
+        const bool started = m_mediaService.exportGif(
+            inputPath,
+            startSec,
+            endSec,
+            outputPath,
+            options,
+            &errorMsg
+        );
+
+        if (!started) {
+            m_statusLabel->setText("Failed to start GIF export.");
+            QMessageBox::critical(this, "GIF Export Failed", errorMsg);
+        }
+    } else {
+        const bool accurateReencode = m_reencodeCheckBox->isChecked();
+
+        const bool started = m_mediaService.trimVideo(
+            inputPath,
+            startSec,
+            endSec,
+            outputPath,
+            accurateReencode,
+            &errorMsg
+        );
+
+        if (!started) {
+            m_statusLabel->setText("Failed to start trimming.");
+            QMessageBox::critical(this, "Trimming Failed", errorMsg);
+        }
     }
 }
 
 void VideoTrimWidget::cancelTrim()
 {
-    m_statusLabel->setText("Cancelling video trimming...");
+    const bool isGif = (m_formatComboBox->currentIndex() == 1);
+    m_statusLabel->setText(isGif ? "Cancelling GIF export..." : "Cancelling video trimming...");
     m_cancelButton->setEnabled(false);
     m_mediaService.cancel();
 }
@@ -643,7 +765,11 @@ void VideoTrimWidget::setUiBusy(bool busy)
     m_startFromBeginningButton->setEnabled(!busy);
     m_endTimeEdit->setEnabled(!busy);
     m_endToEndButton->setEnabled(!busy);
+    m_formatComboBox->setEnabled(!busy);
     m_reencodeCheckBox->setEnabled(!busy);
+    m_gifFpsComboBox->setEnabled(!busy);
+    m_gifResolutionComboBox->setEnabled(!busy);
+    m_gifLoopCheckBox->setEnabled(!busy);
     m_outputPath->setEnabled(!busy);
     m_outputButton->setEnabled(!busy);
 
@@ -684,6 +810,36 @@ void VideoTrimWidget::onVideoTrimFinished(bool success, const QString& errorMess
         m_progressBar->setValue(0);
         m_statusLabel->setText("Failed to trim video.");
         QMessageBox::critical(this, "Trimming Failed", errorMessage);
+    }
+}
+
+void VideoTrimWidget::onGifExportStarted()
+{
+    setUiBusy(true);
+    m_statusLabel->setText("Exporting animated GIF...");
+}
+
+void VideoTrimWidget::onGifExportCancelled()
+{
+    setUiBusy(false);
+    m_progressBar->setValue(0);
+    m_statusLabel->setText("GIF export cancelled.");
+
+    QMessageBox::information(this, "Picture This", "GIF export was cancelled.");
+}
+
+void VideoTrimWidget::onGifExportFinished(bool success, const QString& errorMessage)
+{
+    setUiBusy(false);
+
+    if (success) {
+        m_progressBar->setValue(100);
+        m_statusLabel->setText("GIF exported successfully.");
+        QMessageBox::information(this, "Picture This", "The animated GIF was exported successfully.");
+    } else {
+        m_progressBar->setValue(0);
+        m_statusLabel->setText("Failed to export GIF.");
+        QMessageBox::critical(this, "GIF Export Failed", errorMessage);
     }
 }
 
