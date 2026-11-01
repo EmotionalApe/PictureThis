@@ -37,6 +37,7 @@ public:
     void cancel();
 
     QString executable() const;
+    void setExecutable(const QString& executable);
 
 signals:
     void started();

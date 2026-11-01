@@ -83,6 +83,11 @@ public:
     bool isProcessing() const;
     void cancel();
 
+    void setFfmpegExecutable(const QString& path);
+    void setFfprobeExecutable(const QString& path);
+    QString ffmpegExecutable() const;
+    QString ffprobeExecutable() const;
+
 signals:
     // Image to Video signals
     void videoCreationStarted();

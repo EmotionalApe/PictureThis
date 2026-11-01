@@ -150,6 +150,14 @@ QString ProcessRunner::executable() const
     return m_executable;
 }
 
+void ProcessRunner::setExecutable(const QString& executable)
+{
+    if (isRunning()) {
+        return;
+    }
+    m_executable = executable;
+}
+
 void ProcessRunner::onProcessFinished(int exitCode, QProcess::ExitStatus exitStatus)
 {
     // Flush any remaining lines from buffers

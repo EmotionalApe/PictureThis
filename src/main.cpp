@@ -1,17 +1,11 @@
 #include <QApplication>
 #include <QColor>
 #include <QPalette>
-#include <QStandardPaths>
 
 #include "ui/MainWindow.h"
 #include "media/MediaService.h"
 #include "media/ProcessRunner.h"
-
-static QString resolveTool(const QString& name)
-{
-    const QString resolved = QStandardPaths::findExecutable(name);
-    return resolved.isEmpty() ? name : resolved;
-}
+#include "media/ExecutableLocator.h"
 
 int main(int argc, char *argv[])
 {
@@ -30,8 +24,13 @@ int main(int argc, char *argv[])
     palette.setColor(QPalette::Disabled, QPalette::HighlightedText, Qt::white);
     app.setPalette(palette);
 
-    ProcessRunner ffmpeg(resolveTool("ffmpeg"));
-    ProcessRunner ffprobe(resolveTool("ffprobe"));
+    // Resolve FFmpeg and FFprobe executables via ExecutableLocator
+    // (checking custom preferences, local bundled/app folder, and system PATH)
+    const ToolStatus ffmpegStatus = ExecutableLocator::locateFfmpeg();
+    const ToolStatus ffprobeStatus = ExecutableLocator::locateFfprobe();
+
+    ProcessRunner ffmpeg(ffmpegStatus.isValid ? ffmpegStatus.executablePath : "ffmpeg");
+    ProcessRunner ffprobe(ffprobeStatus.isValid ? ffprobeStatus.executablePath : "ffprobe");
 
     MediaService mediaService(ffmpeg, ffprobe);
 

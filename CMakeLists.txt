@@ -26,9 +26,13 @@ qt_add_executable(PictureThis
     src/ui/VideoTrimWidget.h
     src/ui/VideoCombineWidget.cpp
     src/ui/VideoCombineWidget.h
+    src/ui/SettingsDialog.cpp
+    src/ui/SettingsDialog.h
 
     src/media/ProcessRunner.cpp
     src/media/ProcessRunner.h
+    src/media/ExecutableLocator.cpp
+    src/media/ExecutableLocator.h
 
     src/media/MediaService.cpp
     src/media/MediaService.h

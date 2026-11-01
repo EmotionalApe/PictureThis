@@ -612,3 +612,23 @@ bool MediaService::extractThumbnail(
 
     return true;
 }
+
+void MediaService::setFfmpegExecutable(const QString& path)
+{
+    m_ffmpeg.setExecutable(path);
+}
+
+void MediaService::setFfprobeExecutable(const QString& path)
+{
+    m_ffprobe.setExecutable(path);
+}
+
+QString MediaService::ffmpegExecutable() const
+{
+    return m_ffmpeg.executable();
+}
+
+QString MediaService::ffprobeExecutable() const
+{
+    return m_ffprobe.executable();
+}
