@@ -11,6 +11,7 @@ class QPushButton;
 class QProgressBar;
 class QTimeEdit;
 class QCheckBox;
+class QComboBox;
 class QTimer;
 class QDragEnterEvent;
 class QDragMoveEvent;
@@ -53,6 +54,11 @@ private slots:
     void onVideoTrimCancelled();
     void onVideoTrimFinished(bool success, const QString& errorMessage);
 
+    void onFormatChanged(int index);
+    void onGifExportStarted();
+    void onGifExportCancelled();
+    void onGifExportFinished(bool success, const QString& errorMessage);
+
 private:
     void setUiBusy(bool busy);
     void loadVideo(const QString& path);
@@ -93,7 +99,16 @@ private:
     QPushButton* m_endToEndButton;
 
     QLabel* m_trimSummaryLabel;
+
+    // Export Format & Mode Controls
+    QComboBox* m_formatComboBox;
+    QWidget* m_mp4OptionsWidget;
     QCheckBox* m_reencodeCheckBox;
+
+    QWidget* m_gifOptionsWidget;
+    QComboBox* m_gifFpsComboBox;
+    QComboBox* m_gifResolutionComboBox;
+    QCheckBox* m_gifLoopCheckBox;
 
     QLineEdit* m_outputPath;
     QPushButton* m_outputButton;

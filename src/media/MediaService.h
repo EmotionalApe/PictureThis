@@ -16,11 +16,18 @@ struct VideoMetadata {
     qint64 fileSizeBytes = 0;
 };
 
+struct GifOptions {
+    int fps = 15;
+    int targetWidth = 480; // <= 0 for original width
+    bool infiniteLoop = true;
+};
+
 enum class MediaJobType {
     None,
     ImageToVideo,
     VideoTrim,
-    VideoCombine
+    VideoCombine,
+    GifExport
 };
 
 class MediaService : public QObject
@@ -58,6 +65,15 @@ public:
         const QStringList& inputPaths,
         const QString& outputPath,
         bool forceReencode,
+        QString* errorMessage = nullptr
+    );
+
+    bool exportGif(
+        const QString& inputPath,
+        double startTime,
+        double endTime,
+        const QString& outputPath,
+        const GifOptions& options,
         QString* errorMessage = nullptr
     );
 
@@ -103,6 +119,11 @@ signals:
     void videoCombineStarted();
     void videoCombineCancelled();
     void videoCombineFinished(bool success, const QString& errorMessage);
+
+    // GIF Export signals
+    void gifExportStarted();
+    void gifExportCancelled();
+    void gifExportFinished(bool success, const QString& errorMessage);
 
     // Shared progress signal
     void progressChanged(int percentage);
