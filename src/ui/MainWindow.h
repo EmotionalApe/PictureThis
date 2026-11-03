@@ -6,6 +6,7 @@ class MediaService;
 class ImageAudioWidget;
 class VideoTrimWidget;
 class VideoCombineWidget;
+class VideoCompressWidget;
 class QTabWidget;
 class QCloseEvent;
 class QLabel;
@@ -42,6 +43,7 @@ private:
     ImageAudioWidget* m_imageAudioWidget;
     VideoTrimWidget* m_videoTrimWidget;
     VideoCombineWidget* m_videoCombineWidget;
+    VideoCompressWidget* m_videoCompressWidget;
 
     QWidget* m_alertBanner = nullptr;
     QLabel* m_alertLabel = nullptr;

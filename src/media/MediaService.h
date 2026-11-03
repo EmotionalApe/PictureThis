@@ -22,12 +22,20 @@ struct GifOptions {
     bool infiniteLoop = true;
 };
 
+struct VideoCompressOptions {
+    double targetSizeBytes = 0.0;
+    int targetHeight = 0;       // 0 for original, 1080, 720, 480, 360
+    int audioBitrateKbps = 0;   // 0 for auto
+    bool twoPass = true;
+};
+
 enum class MediaJobType {
     None,
     ImageToVideo,
     VideoTrim,
     VideoCombine,
-    GifExport
+    GifExport,
+    VideoCompress
 };
 
 class MediaService : public QObject
@@ -74,6 +82,13 @@ public:
         double endTime,
         const QString& outputPath,
         const GifOptions& options,
+        QString* errorMessage = nullptr
+    );
+
+    bool compressVideo(
+        const QString& inputPath,
+        const QString& outputPath,
+        const VideoCompressOptions& options,
         QString* errorMessage = nullptr
     );
 
@@ -125,6 +140,12 @@ signals:
     void gifExportCancelled();
     void gifExportFinished(bool success, const QString& errorMessage);
 
+    // Video Compression signals
+    void videoCompressStarted();
+    void videoCompressCancelled();
+    void videoCompressFinished(bool success, const QString& errorMessage);
+    void compressStatusChanged(const QString& statusText);
+
     // Shared progress signal
     void progressChanged(int percentage);
 
@@ -146,4 +167,10 @@ private:
     double m_targetDuration = 0.0;
     QString m_currentOutputPath;
     QString m_concatManifestPath;
+
+    // Multi-pass compression state
+    int m_compressPass = 0;
+    QString m_passLogPrefix;
+    QStringList m_compressPass2Args;
+    double m_compressSourceDuration = 0.0;
 };

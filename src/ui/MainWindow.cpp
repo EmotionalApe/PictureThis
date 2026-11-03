@@ -2,6 +2,7 @@
 #include "ImageAudioWidget.h"
 #include "VideoTrimWidget.h"
 #include "VideoCombineWidget.h"
+#include "VideoCompressWidget.h"
 #include "SettingsDialog.h"
 #include "../media/MediaService.h"
 #include "../media/ExecutableLocator.h"
@@ -23,7 +24,8 @@ MainWindow::MainWindow(
       m_tabWidget(new QTabWidget(this)),
       m_imageAudioWidget(new ImageAudioWidget(mediaService, this)),
       m_videoTrimWidget(new VideoTrimWidget(mediaService, this)),
-      m_videoCombineWidget(new VideoCombineWidget(mediaService, this))
+      m_videoCombineWidget(new VideoCombineWidget(mediaService, this)),
+      m_videoCompressWidget(new VideoCompressWidget(mediaService, this))
 {
     setWindowTitle("Picture This");
     resize(980, 600);
@@ -62,6 +64,9 @@ MainWindow::MainWindow(
     // Tab 3: Video Combining
     m_tabWidget->addTab(m_videoCombineWidget, "Combine Videos");
 
+    // Tab 4: Video Compressing
+    m_tabWidget->addTab(m_videoCompressWidget, "Compress Video");
+
     // Top-right corner settings button
     m_settingsBtn = new QPushButton("⚙ Settings", this);
     m_settingsBtn->setCursor(Qt::PointingHandCursor);
@@ -98,15 +103,18 @@ MainWindow::MainWindow(
     connect(&mediaService, &MediaService::videoTrimStarted,      this, &MainWindow::onJobStarted);
     connect(&mediaService, &MediaService::videoCombineStarted,   this, &MainWindow::onJobStarted);
     connect(&mediaService, &MediaService::gifExportStarted,      this, &MainWindow::onJobStarted);
+    connect(&mediaService, &MediaService::videoCompressStarted,  this, &MainWindow::onJobStarted);
 
     connect(&mediaService, &MediaService::videoCreationFinished,  this, [this](bool, const QString&) { onJobStopped(); });
     connect(&mediaService, &MediaService::videoTrimFinished,      this, [this](bool, const QString&) { onJobStopped(); });
     connect(&mediaService, &MediaService::videoCombineFinished,   this, [this](bool, const QString&) { onJobStopped(); });
     connect(&mediaService, &MediaService::gifExportFinished,      this, [this](bool, const QString&) { onJobStopped(); });
+    connect(&mediaService, &MediaService::videoCompressFinished,  this, [this](bool, const QString&) { onJobStopped(); });
     connect(&mediaService, &MediaService::videoCreationCancelled, this, &MainWindow::onJobStopped);
     connect(&mediaService, &MediaService::videoTrimCancelled,     this, &MainWindow::onJobStopped);
     connect(&mediaService, &MediaService::videoCombineCancelled,  this, &MainWindow::onJobStopped);
     connect(&mediaService, &MediaService::gifExportCancelled,    this, &MainWindow::onJobStopped);
+    connect(&mediaService, &MediaService::videoCompressCancelled, this, &MainWindow::onJobStopped);
 
     checkToolStatus();
 }
