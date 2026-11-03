@@ -120,22 +120,28 @@ bool MediaService::trimVideo(
         return false;
     }
 
+    const double duration = endTime - startTime;
+
     QStringList arguments;
     arguments << "-y" << "-progress" << "pipe:1" << "-nostats";
 
     if (!accurateReencode) {
         // Fast stream copy mode
-        arguments << "-ss" << QString::number(startTime, 'f', 6)
-                  << "-to" << QString::number(endTime, 'f', 6)
-                  << "-i" << inputPath
+        if (startTime > 0.0) {
+            arguments << "-ss" << QString::number(startTime, 'f', 6);
+        }
+        arguments << "-i" << inputPath
+                  << "-t" << QString::number(duration, 'f', 6)
                   << "-c" << "copy"
                   << "-avoid_negative_ts" << "make_zero"
                   << outputPath;
     } else {
         // Frame-accurate re-encode mode
-        arguments << "-ss" << QString::number(startTime, 'f', 6)
-                  << "-to" << QString::number(endTime, 'f', 6)
-                  << "-i" << inputPath
+        if (startTime > 0.0) {
+            arguments << "-ss" << QString::number(startTime, 'f', 6);
+        }
+        arguments << "-i" << inputPath
+                  << "-t" << QString::number(duration, 'f', 6)
                   << "-c:v" << "libx264"
                   << "-crf" << "20"
                   << "-c:a" << "aac"
@@ -388,11 +394,15 @@ bool MediaService::exportGif(
                             .arg(fps);
     }
 
+    const double duration = endTime - startTime;
+
     QStringList arguments;
-    arguments << "-y" << "-progress" << "pipe:1" << "-nostats"
-              << "-ss" << QString::number(startTime, 'f', 6)
-              << "-to" << QString::number(endTime, 'f', 6)
-              << "-i" << inputPath
+    arguments << "-y" << "-progress" << "pipe:1" << "-nostats";
+    if (startTime > 0.0) {
+        arguments << "-ss" << QString::number(startTime, 'f', 6);
+    }
+    arguments << "-i" << inputPath
+              << "-t" << QString::number(duration, 'f', 6)
               << "-filter_complex" << filterComplex
               << "-loop" << (options.infiniteLoop ? "0" : "-1")
               << outputPath;
@@ -418,6 +428,193 @@ bool MediaService::exportGif(
     return true;
 }
 
+bool MediaService::compressVideo(
+    const QString& inputPath,
+    const QString& outputPath,
+    const VideoCompressOptions& options,
+    QString* errorMessage)
+{
+    if (m_isProcessing) {
+        if (errorMessage) {
+            *errorMessage = "A media job is already in progress.";
+        }
+        return false;
+    }
+
+    if (inputPath.isEmpty() || !QFile::exists(inputPath)) {
+        if (errorMessage) {
+            *errorMessage = "Input video file does not exist.";
+        }
+        return false;
+    }
+
+    if (outputPath.isEmpty()) {
+        if (errorMessage) {
+            *errorMessage = "Output path cannot be empty.";
+        }
+        return false;
+    }
+
+    if (QFileInfo(inputPath).canonicalFilePath() == QFileInfo(outputPath).canonicalFilePath()) {
+        if (errorMessage) {
+            *errorMessage = "Output path cannot be the same as input file.";
+        }
+        return false;
+    }
+
+    if (options.targetSizeBytes <= 10000.0) {
+        if (errorMessage) {
+            *errorMessage = "Target file size is too small.";
+        }
+        return false;
+    }
+
+    VideoMetadata meta;
+    if (!getVideoMetadata(inputPath, meta, errorMessage)) {
+        return false;
+    }
+
+    if (meta.durationSeconds <= 0.0) {
+        if (errorMessage) {
+            *errorMessage = "Could not determine input video duration.";
+        }
+        return false;
+    }
+
+    // Apply 3% safety margin for MP4 container / moov atom / packet muxing overhead
+    const double targetBudgetBits = options.targetSizeBytes * 0.97 * 8.0;
+    const double totalBitrateKbps = targetBudgetBits / (meta.durationSeconds * 1000.0);
+
+    const bool hasAudio = !meta.audioCodec.isEmpty();
+    int audioBitrateKbps = 0;
+    if (hasAudio) {
+        if (options.audioBitrateKbps > 0) {
+            audioBitrateKbps = options.audioBitrateKbps;
+        } else {
+            // Adaptive audio bitrate based on total available bandwidth
+            if (totalBitrateKbps < 300.0) {
+                audioBitrateKbps = 64;
+            } else if (totalBitrateKbps < 800.0) {
+                audioBitrateKbps = 96;
+            } else {
+                audioBitrateKbps = 128;
+            }
+        }
+
+        // Ensure audio bitrate doesn't starve video bitrate
+        if (audioBitrateKbps >= totalBitrateKbps * 0.5) {
+            audioBitrateKbps = std::max(32, static_cast<int>(totalBitrateKbps * 0.25));
+        }
+    }
+
+    int videoBitrateKbps = static_cast<int>(totalBitrateKbps - audioBitrateKbps);
+    videoBitrateKbps = std::max(videoBitrateKbps, 32); // absolute floor
+
+    // Resolution filter
+    QString vf;
+    if (options.targetHeight > 0) {
+        vf = QString("scale=-2:%1,pad=ceil(iw/2)*2:ceil(ih/2)*2,format=yuv420p").arg(options.targetHeight);
+    } else {
+        vf = "pad=ceil(iw/2)*2:ceil(ih/2)*2,format=yuv420p";
+    }
+
+    cleanupTemporaryFiles();
+
+    m_passLogPrefix = QDir::temp().filePath(QString("ffmpeg2pass_%1_%2")
+        .arg(QDateTime::currentMSecsSinceEpoch())
+        .arg(QCoreApplication::applicationPid()));
+
+    m_isProcessing = true;
+    m_isCancelling = false;
+    m_currentJob = MediaJobType::VideoCompress;
+    m_targetDuration = meta.durationSeconds;
+    m_compressSourceDuration = meta.durationSeconds;
+    m_currentOutputPath = outputPath;
+
+    if (options.twoPass) {
+        m_compressPass = 1;
+
+        QStringList pass1Args;
+        pass1Args << "-y" << "-progress" << "pipe:1" << "-nostats"
+                  << "-i" << inputPath
+                  << "-vf" << vf
+                  << "-c:v" << "libx264"
+                  << "-b:v" << QString("%1k").arg(videoBitrateKbps)
+                  << "-pass" << "1"
+                  << "-passlogfile" << m_passLogPrefix
+                  << "-an"
+                  << "-f" << "null"
+                  << "-";
+
+        QStringList pass2Args;
+        pass2Args << "-y" << "-progress" << "pipe:1" << "-nostats"
+                  << "-i" << inputPath
+                  << "-vf" << vf
+                  << "-c:v" << "libx264"
+                  << "-b:v" << QString("%1k").arg(videoBitrateKbps)
+                  << "-pass" << "2"
+                  << "-passlogfile" << m_passLogPrefix;
+
+        if (hasAudio) {
+            pass2Args << "-c:a" << "aac" << "-b:a" << QString("%1k").arg(audioBitrateKbps);
+        } else {
+            pass2Args << "-an";
+        }
+        pass2Args << "-pix_fmt" << "yuv420p" << outputPath;
+
+        m_compressPass2Args = pass2Args;
+
+        if (!m_ffmpeg.start(pass1Args)) {
+            m_isProcessing = false;
+            m_currentJob = MediaJobType::None;
+            m_targetDuration = 0.0;
+            m_compressPass = 0;
+            cleanupTemporaryFiles();
+            if (errorMessage) {
+                *errorMessage = "Failed to start FFmpeg pass 1 process.";
+            }
+            return false;
+        }
+
+        emit videoCompressStarted();
+        emit compressStatusChanged("Pass 1/2: Analyzing video...");
+        emit progressChanged(0);
+        return true;
+    } else {
+        m_compressPass = 0;
+
+        QStringList singlePassArgs;
+        singlePassArgs << "-y" << "-progress" << "pipe:1" << "-nostats"
+                       << "-i" << inputPath
+                       << "-vf" << vf
+                       << "-c:v" << "libx264"
+                       << "-b:v" << QString("%1k").arg(videoBitrateKbps);
+
+        if (hasAudio) {
+            singlePassArgs << "-c:a" << "aac" << "-b:a" << QString("%1k").arg(audioBitrateKbps);
+        } else {
+            singlePassArgs << "-an";
+        }
+        singlePassArgs << "-pix_fmt" << "yuv420p" << outputPath;
+
+        if (!m_ffmpeg.start(singlePassArgs)) {
+            m_isProcessing = false;
+            m_currentJob = MediaJobType::None;
+            m_targetDuration = 0.0;
+            cleanupTemporaryFiles();
+            if (errorMessage) {
+                *errorMessage = "Failed to start FFmpeg process.";
+            }
+            return false;
+        }
+
+        emit videoCompressStarted();
+        emit compressStatusChanged("Compressing video...");
+        emit progressChanged(0);
+        return true;
+    }
+}
+
 bool MediaService::isProcessing() const
 {
     return m_isProcessing;
@@ -439,6 +636,14 @@ void MediaService::cleanupTemporaryFiles()
         }
         m_concatManifestPath.clear();
     }
+
+    if (!m_passLogPrefix.isEmpty()) {
+        QFile::remove(m_passLogPrefix + "-0.log");
+        QFile::remove(m_passLogPrefix + "-0.log.mbtree");
+        QFile::remove(m_passLogPrefix + ".log");
+        QFile::remove(m_passLogPrefix + ".log.mbtree");
+        m_passLogPrefix.clear();
+    }
 }
 
 void MediaService::onStandardOutputLineReceived(const QString& line)
@@ -454,10 +659,23 @@ void MediaService::onStandardOutputLineReceived(const QString& line)
             const double totalUs = m_targetDuration * 1000000.0;
             int percentage = static_cast<int>((static_cast<double>(outTimeUs) / totalUs) * 100.0);
             percentage = std::clamp(percentage, 0, 100);
+
+            if (m_currentJob == MediaJobType::VideoCompress && m_compressPass > 0) {
+                if (m_compressPass == 1) {
+                    percentage = percentage / 2;
+                } else {
+                    percentage = 50 + (percentage / 2);
+                }
+            }
+
             emit progressChanged(percentage);
         }
     } else if (line.startsWith(QLatin1String("progress=end"))) {
-        emit progressChanged(100);
+        if (m_currentJob == MediaJobType::VideoCompress && m_compressPass == 1) {
+            emit progressChanged(50);
+        } else {
+            emit progressChanged(100);
+        }
     }
 }
 
@@ -467,6 +685,7 @@ void MediaService::handleJobCompletion(bool success, const QString& errorMessage
     m_isProcessing = false;
     m_currentJob = MediaJobType::None;
     m_targetDuration = 0.0;
+    m_compressPass = 0;
 
     cleanupTemporaryFiles();
 
@@ -482,6 +701,8 @@ void MediaService::handleJobCompletion(bool success, const QString& errorMessage
         emit videoCombineFinished(success, errorMessage);
     } else if (job == MediaJobType::GifExport) {
         emit gifExportFinished(success, errorMessage);
+    } else if (job == MediaJobType::VideoCompress) {
+        emit videoCompressFinished(success, errorMessage);
     }
 }
 
@@ -492,6 +713,7 @@ void MediaService::handleJobCancellation()
     m_isCancelling = false;
     m_currentJob = MediaJobType::None;
     m_targetDuration = 0.0;
+    m_compressPass = 0;
 
     cleanupTemporaryFiles();
 
@@ -515,6 +737,8 @@ void MediaService::handleJobCancellation()
         emit videoCombineCancelled();
     } else if (job == MediaJobType::GifExport) {
         emit gifExportCancelled();
+    } else if (job == MediaJobType::VideoCompress) {
+        emit videoCompressCancelled();
     }
 }
 
@@ -533,6 +757,26 @@ void MediaService::onFfmpegFinished(
     if (m_isCancelling) {
         handleJobCancellation();
         return;
+    }
+
+    // Sequence pass 1 -> pass 2 for VideoCompress
+    if (m_currentJob == MediaJobType::VideoCompress && m_compressPass == 1) {
+        if (exitStatus == QProcess::NormalExit && exitCode == 0) {
+            m_compressPass = 2;
+            emit compressStatusChanged("Pass 2/2: Compressing video...");
+            emit progressChanged(50);
+            if (!m_ffmpeg.start(m_compressPass2Args)) {
+                handleJobCompletion(false, "Failed to start FFmpeg pass 2 encoding process.");
+            }
+            return;
+        } else {
+            QString errorMsg = stderrStr.trimmed();
+            if (errorMsg.isEmpty()) {
+                errorMsg = QString("FFmpeg pass 1 analysis failed with exit code %1.").arg(exitCode);
+            }
+            handleJobCompletion(false, errorMsg);
+            return;
+        }
     }
 
     if (exitStatus == QProcess::NormalExit && exitCode == 0) {

@@ -26,6 +26,8 @@ qt_add_executable(PictureThis
     src/ui/VideoTrimWidget.h
     src/ui/VideoCombineWidget.cpp
     src/ui/VideoCombineWidget.h
+    src/ui/VideoCompressWidget.cpp
+    src/ui/VideoCompressWidget.h
     src/ui/SettingsDialog.cpp
     src/ui/SettingsDialog.h
 
