@@ -6,6 +6,7 @@
 #include "SettingsDialog.h"
 #include "../media/MediaService.h"
 #include "../media/ExecutableLocator.h"
+#include "../media/InspectionScheduler.h"
 
 #include <QCloseEvent>
 #include <QLabel>
@@ -18,13 +19,15 @@
 
 MainWindow::MainWindow(
     MediaService& mediaService,
+    InspectionScheduler& scheduler,
     QWidget* parent)
     : QMainWindow(parent),
       m_mediaService(mediaService),
+      m_scheduler(scheduler),
       m_tabWidget(new QTabWidget(this)),
       m_imageAudioWidget(new ImageAudioWidget(mediaService, this)),
-      m_videoTrimWidget(new VideoTrimWidget(mediaService, this)),
-      m_videoCombineWidget(new VideoCombineWidget(mediaService, this)),
+      m_videoTrimWidget(new VideoTrimWidget(mediaService, scheduler, this)),
+      m_videoCombineWidget(new VideoCombineWidget(mediaService, scheduler, this)),
       m_videoCompressWidget(new VideoCompressWidget(mediaService, this))
 {
     setWindowTitle("Picture This");
@@ -213,7 +216,11 @@ void MainWindow::checkToolStatus()
 void MainWindow::onOpenSettings()
 {
     SettingsDialog dialog(m_mediaService, this);
-    connect(&dialog, &SettingsDialog::settingsSaved, this, &MainWindow::checkToolStatus);
+    connect(&dialog, &SettingsDialog::settingsSaved, this, [this]() {
+        checkToolStatus();
+        m_scheduler.setFfmpegExecutable(m_mediaService.ffmpegExecutable());
+        m_scheduler.setFfprobeExecutable(m_mediaService.ffprobeExecutable());
+    });
     dialog.exec();
 }
 
@@ -240,6 +247,8 @@ QWidget* MainWindow::createPlaceholderWidget(const QString& title, const QString
 
 void MainWindow::closeEvent(QCloseEvent* event)
 {
+    m_scheduler.cancelAll();
+
     if (m_mediaService.isProcessing()) {
         const auto reply = QMessageBox::question(
             this,

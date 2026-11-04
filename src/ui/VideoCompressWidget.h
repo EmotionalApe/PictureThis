@@ -39,6 +39,7 @@ private slots:
     void chooseOutput();
     void compressVideo();
     void cancelCompression();
+    void onClearClicked();
 
     void onVideoPathChanged(const QString& path);
     void onPercentageSliderChanged(int value);
@@ -69,7 +70,11 @@ private:
 
     // Left Column Preview & Summary
     QWidget* m_placeholderCard;
+    QPushButton* m_placeholderAddButton;
     QWidget* m_previewContainer;
+    QWidget* m_previewToolbar;
+    QPushButton* m_chooseVideoButton;
+    QPushButton* m_clearButton;
     QLabel* m_thumbnailLabel;
     QLabel* m_sourceMetadataLabel;
     QLabel* m_compressionSummaryLabel;

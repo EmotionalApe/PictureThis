@@ -4,7 +4,9 @@
 #include <QPixmap>
 #include <QTime>
 #include "../media/MediaService.h"
+#include "../media/InspectionTypes.h"
 
+class InspectionScheduler;
 class QLineEdit;
 class QLabel;
 class QPushButton;
@@ -26,6 +28,7 @@ class VideoTrimWidget : public QWidget
 public:
     explicit VideoTrimWidget(
         MediaService& mediaService,
+        InspectionScheduler& scheduler,
         QWidget* parent = nullptr
     );
     ~VideoTrimWidget() override = default;
@@ -41,6 +44,7 @@ private slots:
     void chooseOutput();
     void trimVideo();
     void cancelTrim();
+    void onClearClicked();
 
     void onVideoPathChanged(const QString& path);
     void onStartTimeChanged(const QTime& time);
@@ -59,6 +63,10 @@ private slots:
     void onGifExportCancelled();
     void onGifExportFinished(bool success, const QString& errorMessage);
 
+    // InspectionScheduler signals
+    void onInspectionMetadataReady(const ProbeResult& result);
+    void onInspectionThumbnailReady(const ThumbnailResult& result);
+
 private:
     void setUiBusy(bool busy);
     void loadVideo(const QString& path);
@@ -72,12 +80,21 @@ private:
     static QString formatDuration(double seconds);
 
     MediaService& m_mediaService;
+    InspectionScheduler& m_scheduler;
     VideoMetadata m_currentMetadata;
     bool m_videoLoaded = false;
 
+    RequestId m_pendingMetadataId;
+    RequestId m_pendingStartThumbId;
+    RequestId m_pendingEndThumbId;
+
     // Dual thumbnail preview & timeline
     QWidget* m_placeholderCard;
+    QPushButton* m_placeholderAddButton;
     QWidget* m_thumbnailsContainer;
+    QWidget* m_previewToolbar;
+    QPushButton* m_chooseVideoButton;
+    QPushButton* m_clearButton;
     QLabel* m_startThumbnailLabel;
     QLabel* m_startCaptionLabel;
     QLabel* m_endThumbnailLabel;
@@ -121,4 +138,11 @@ private:
 
     // Debounce timer for smooth thumbnail extraction
     QTimer* m_thumbnailTimer;
+
+    // Monotonically increasing serial number for stale-result detection.
+    // Incremented every time a new thumbnail request is issued. A result
+    // captured under an older serial is silently discarded so that a
+    // thumbnail from a superseded trim position can never overwrite the
+    // current preview.
+    quint64 m_thumbSerial = 0;
 };

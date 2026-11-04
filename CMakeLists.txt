@@ -36,6 +36,12 @@ qt_add_executable(PictureThis
     src/media/ExecutableLocator.cpp
     src/media/ExecutableLocator.h
 
+    src/media/InspectionTypes.h
+    src/media/InspectionWorker.cpp
+    src/media/InspectionWorker.h
+    src/media/InspectionScheduler.cpp
+    src/media/InspectionScheduler.h
+
     src/media/MediaService.cpp
     src/media/MediaService.h
 )

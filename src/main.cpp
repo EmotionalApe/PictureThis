@@ -6,6 +6,7 @@
 #include "media/MediaService.h"
 #include "media/ProcessRunner.h"
 #include "media/ExecutableLocator.h"
+#include "media/InspectionScheduler.h"
 
 int main(int argc, char *argv[])
 {
@@ -29,12 +30,16 @@ int main(int argc, char *argv[])
     const ToolStatus ffmpegStatus = ExecutableLocator::locateFfmpeg();
     const ToolStatus ffprobeStatus = ExecutableLocator::locateFfprobe();
 
-    ProcessRunner ffmpeg(ffmpegStatus.isValid ? ffmpegStatus.executablePath : "ffmpeg");
-    ProcessRunner ffprobe(ffprobeStatus.isValid ? ffprobeStatus.executablePath : "ffprobe");
+    const QString ffmpegPath = ffmpegStatus.isValid ? ffmpegStatus.executablePath : "ffmpeg";
+    const QString ffprobePath = ffprobeStatus.isValid ? ffprobeStatus.executablePath : "ffprobe";
+
+    ProcessRunner ffmpeg(ffmpegPath);
+    ProcessRunner ffprobe(ffprobePath);
 
     MediaService mediaService(ffmpeg, ffprobe);
+    InspectionScheduler inspectionScheduler(ffmpegPath, ffprobePath, 2);
 
-    MainWindow window(mediaService);
+    MainWindow window(mediaService, inspectionScheduler);
     window.show();
 
     return app.exec();

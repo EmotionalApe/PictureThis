@@ -32,7 +32,11 @@ VideoCompressWidget::VideoCompressWidget(
     : QWidget(parent),
       m_mediaService(mediaService),
       m_placeholderCard(new QWidget(this)),
+      m_placeholderAddButton(new QPushButton("+ Choose Video", this)),
       m_previewContainer(new QWidget(this)),
+      m_previewToolbar(new QWidget(this)),
+      m_chooseVideoButton(new QPushButton("+ Choose Video", this)),
+      m_clearButton(new QPushButton("Clear", this)),
       m_thumbnailLabel(new QLabel(this)),
       m_sourceMetadataLabel(new QLabel("No video loaded", this)),
       m_compressionSummaryLabel(new QLabel(this)),
@@ -74,18 +78,32 @@ VideoCompressWidget::VideoCompressWidget(
 
     // Placeholder Card (shown when no video is loaded)
     auto* placeholderLayout = new QVBoxLayout(m_placeholderCard);
-    placeholderLayout->setContentsMargins(0, 0, 0, 0);
+    placeholderLayout->setContentsMargins(20, 24, 20, 24);
+    placeholderLayout->setAlignment(Qt::AlignCenter);
+    placeholderLayout->setSpacing(14);
+
     auto* placeholderLabel = new QLabel(
-        "No video selected\n\nDrag & drop a video file here\nor click Browse",
+        "No video selected\n\nDrag & drop a video file here\nor click below to select a file:",
         m_placeholderCard
     );
     placeholderLabel->setAlignment(Qt::AlignCenter);
-    placeholderLabel->setMinimumSize(280, 200);
-    placeholderLabel->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Expanding);
-    placeholderLabel->setStyleSheet(
-        "border: 2px dashed #888888; border-radius: 8px; background-color: rgba(128, 128, 128, 0.08); padding: 12px; color: #555555;"
-    );
+    placeholderLabel->setStyleSheet("color: #555555; font-size: 12px;");
+
+    m_placeholderAddButton->setStyleSheet("font-weight: bold; padding: 7px 18px;");
+
+    placeholderLayout->addStretch(1);
     placeholderLayout->addWidget(placeholderLabel);
+    placeholderLayout->addWidget(m_placeholderAddButton, 0, Qt::AlignCenter);
+    placeholderLayout->addStretch(1);
+
+    m_placeholderCard->setStyleSheet(
+        "QWidget#placeholderCard {"
+        "    border: 2px dashed #888888;"
+        "    border-radius: 8px;"
+        "    background-color: rgba(128, 128, 128, 0.08);"
+        "}"
+    );
+    m_placeholderCard->setObjectName("placeholderCard");
     leftLayout->addWidget(m_placeholderCard, 1);
 
     // Preview Container (shown once video is loaded)
@@ -123,6 +141,18 @@ VideoCompressWidget::VideoCompressWidget(
 
     m_previewContainer->hide();
     leftLayout->addWidget(m_previewContainer, 1);
+
+    // Bottom Preview Toolbar (shown when video is loaded)
+    auto* toolbarLayout = new QHBoxLayout(m_previewToolbar);
+    toolbarLayout->setContentsMargins(0, 0, 0, 0);
+    toolbarLayout->setSpacing(6);
+    m_chooseVideoButton->setStyleSheet("font-weight: bold; padding: 5px 12px;");
+    m_clearButton->setStyleSheet("padding: 5px 10px;");
+    toolbarLayout->addWidget(m_chooseVideoButton);
+    toolbarLayout->addStretch(1);
+    toolbarLayout->addWidget(m_clearButton);
+    m_previewToolbar->hide();
+    leftLayout->addWidget(m_previewToolbar);
 
     // ==================== RIGHT COLUMN: SETTINGS & CONTROLS ====================
     auto* rightWidget = new QWidget(this);
@@ -277,6 +307,10 @@ VideoCompressWidget::VideoCompressWidget(
     rootLayout->addWidget(rightWidget, 6);
 
     // ==================== CONNECTIONS ====================
+    connect(m_placeholderAddButton, &QPushButton::clicked, this, &VideoCompressWidget::chooseVideo);
+    connect(m_chooseVideoButton, &QPushButton::clicked, this, &VideoCompressWidget::chooseVideo);
+    connect(m_clearButton, &QPushButton::clicked, this, &VideoCompressWidget::onClearClicked);
+
     connect(m_videoButton, &QPushButton::clicked, this, &VideoCompressWidget::chooseVideo);
     connect(m_outputButton, &QPushButton::clicked, this, &VideoCompressWidget::chooseOutput);
     connect(m_videoPath, &QLineEdit::textChanged, this, &VideoCompressWidget::onVideoPathChanged);
@@ -380,6 +414,7 @@ void VideoCompressWidget::loadVideo(const QString& path)
         m_currentMetadata = VideoMetadata();
         m_placeholderCard->show();
         m_previewContainer->hide();
+        m_previewToolbar->hide();
         m_sourceMetadataLabel->setText("No video loaded");
         updateCompressionCalculations();
         return;
@@ -389,6 +424,7 @@ void VideoCompressWidget::loadVideo(const QString& path)
     if (!m_mediaService.getVideoMetadata(path, m_currentMetadata, &probeError)) {
         m_placeholderCard->show();
         m_previewContainer->hide();
+        m_previewToolbar->hide();
         m_statusLabel->setText(QString("Probe error: %1").arg(probeError));
         updateCompressionCalculations();
         return;
@@ -397,6 +433,7 @@ void VideoCompressWidget::loadVideo(const QString& path)
     m_videoLoaded = true;
     m_placeholderCard->hide();
     m_previewContainer->show();
+    m_previewToolbar->show();
 
     // Source Metadata Banner
     const qint64 origSize = (m_currentMetadata.fileSizeBytes > 0)
@@ -699,8 +736,18 @@ void VideoCompressWidget::onVideoCompressFinished(bool success, const QString& e
     }
 }
 
+void VideoCompressWidget::onClearClicked()
+{
+    m_videoPath->clear();
+    m_outputPath->clear();
+    loadVideo("");
+}
+
 void VideoCompressWidget::setUiBusy(bool busy)
 {
+    m_placeholderAddButton->setEnabled(!busy);
+    m_chooseVideoButton->setEnabled(!busy);
+    m_clearButton->setEnabled(!busy);
     m_videoButton->setEnabled(!busy);
     m_videoPath->setEnabled(!busy);
     m_preset75Btn->setEnabled(!busy);

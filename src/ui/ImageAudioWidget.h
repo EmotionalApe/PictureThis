@@ -39,6 +39,8 @@ private slots:
     void pasteImageFromClipboard();
     void createVideo();
     void cancelVideo();
+    void onClearImageClicked();
+    void onClearAudioClicked();
 
     void onImagePathChanged(const QString& path);
     void onAudioPathChanged(const QString& path);
@@ -59,6 +61,13 @@ private:
     MediaService& m_mediaService;
 
     // Image preview & info
+    QWidget* m_placeholderCard;
+    QPushButton* m_placeholderChooseButton;
+    QPushButton* m_placeholderPasteButton;
+    QWidget* m_previewContainer;
+    QWidget* m_previewToolbar;
+    QPushButton* m_chooseImageButton;
+    QPushButton* m_clearImageButton;
     QLabel* m_previewLabel;
     QLabel* m_imageInfoLabel;
     QPixmap m_loadedPixmap;
@@ -71,6 +80,7 @@ private:
     QPushButton* m_imageButton;
     QPushButton* m_pasteButton;
     QPushButton* m_audioButton;
+    QPushButton* m_audioClearButton;
     QLabel* m_audioInfoLabel;
     QPushButton* m_outputButton;
     QPushButton* m_createButton;
