@@ -6,6 +6,7 @@
 #include <QSet>
 #include <memory>
 #include "InspectionTypes.h"
+#include "MediaCache.h"
 
 class InspectionWorker;
 
@@ -78,4 +79,5 @@ private:
     QList<InspectionWorker*> m_workers;
     QList<InspectionTask> m_pendingQueue;
     QSet<uint64_t> m_cancelledSerials;
+    MediaCache m_cache;
 };

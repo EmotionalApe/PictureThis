@@ -4,6 +4,7 @@
 #include <QProcess>
 #include <QString>
 #include <QStringList>
+#include <QTimer>
 
 class ProcessRunner : public QObject
 {
@@ -51,10 +52,18 @@ private slots:
     void onProcessError(QProcess::ProcessError error);
     void onReadyReadStandardOutput();
     void onReadyReadStandardError();
+    void onGracefulTimeout();
+    void onTerminateTimeout();
 
 private:
+    // Cancel escalation state machine: Idle → AwaitGraceful → AwaitTerminate → AwaitKill
+    enum class CancelStage { Idle, AwaitGraceful, AwaitTerminate, AwaitKill };
+
     QString m_executable;
     QProcess m_process;
     QString m_standardOutput;
     QString m_standardError;
+    QTimer m_gracefulTimer;    // fires if 'q' doesn't elicit exit within 3 s
+    QTimer m_terminateTimer;   // fires if SIGTERM doesn't elicit exit within 1 s
+    CancelStage m_cancelStage = CancelStage::Idle;
 };

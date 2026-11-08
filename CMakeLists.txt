@@ -41,6 +41,8 @@ qt_add_executable(PictureThis
     src/media/InspectionWorker.h
     src/media/InspectionScheduler.cpp
     src/media/InspectionScheduler.h
+    src/media/MediaCache.h
+    src/media/MediaCache.cpp
 
     src/media/MediaService.cpp
     src/media/MediaService.h

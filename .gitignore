@@ -25,3 +25,6 @@ Thumbs.db
 
 # Dev Documentation
 dev_docs/
+
+#scripts
+*.sh

@@ -303,8 +303,11 @@ VideoCompressWidget::VideoCompressWidget(
     m_statusLabel->setStyleSheet("font-size: 11px; color: palette(mid);");
     rightLayout->addWidget(m_statusLabel);
 
-    rootLayout->addWidget(leftWidget, 5);
-    rootLayout->addWidget(rightWidget, 6);
+    // Assemble root two-column layout (balanced 1:1 split matching all tabs)
+    leftWidget->setSizePolicy(QSizePolicy::Ignored, QSizePolicy::Preferred);
+    rightWidget->setSizePolicy(QSizePolicy::Ignored, QSizePolicy::Preferred);
+    rootLayout->addWidget(leftWidget, 1);
+    rootLayout->addWidget(rightWidget, 1);
 
     // ==================== CONNECTIONS ====================
     connect(m_placeholderAddButton, &QPushButton::clicked, this, &VideoCompressWidget::chooseVideo);

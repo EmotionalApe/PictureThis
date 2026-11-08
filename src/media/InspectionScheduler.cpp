@@ -1,5 +1,6 @@
 #include "InspectionScheduler.h"
 #include "InspectionWorker.h"
+#include "MediaCache.h"
 
 InspectionScheduler::InspectionScheduler(
     QString ffmpegExe,
@@ -45,6 +46,27 @@ RequestId InspectionScheduler::requestMetadata(
 {
     const RequestId req = generateRequestId(filePath, 0.0, purpose);
 
+    // Check the cache first. If we have a valid, up-to-date result for this
+    // file (keyed on path + mtime) we can satisfy the request immediately
+    // without spawning a worker process.
+    const CacheKey cacheKey = MediaCache::makeKey(filePath);
+    if (auto cached = m_cache.getMetadata(cacheKey)) {
+        ProbeResult result;
+        result.id       = req;
+        result.success  = true;
+        result.metadata = *cached;
+
+        // Emit via a queued invocation so the caller receives the RequestId
+        // before any connected slot processes the result.
+        QMetaObject::invokeMethod(this, [this, result]() {
+            emit inspectionStatusChanged(result.id, InspectionStatus::Ready);
+            emit metadataReady(result);
+            emit queueStatsChanged(activeCount(), queuedCount());
+        }, Qt::QueuedConnection);
+
+        return req;
+    }
+
     InspectionTask task;
     task.id = req;
     task.kind = InspectionKind::Metadata;
@@ -70,6 +92,25 @@ RequestId InspectionScheduler::requestThumbnail(
     bool highPriority)
 {
     const RequestId req = generateRequestId(filePath, timestampSeconds, purpose);
+
+    // Check the cache before queuing a worker task.
+    // The key includes the timestamp (rounded to ms) so different seek positions
+    // in the same file are stored as independent entries.
+    const CacheKey cacheKey = MediaCache::makeKey(filePath, timestampSeconds);
+    if (auto cached = m_cache.getThumbnail(cacheKey)) {
+        ThumbnailResult result;
+        result.id        = req;
+        result.success   = true;
+        result.thumbnail = *cached;
+
+        QMetaObject::invokeMethod(this, [this, result]() {
+            emit inspectionStatusChanged(result.id, InspectionStatus::Ready);
+            emit thumbnailReady(result);
+            emit queueStatsChanged(activeCount(), queuedCount());
+        }, Qt::QueuedConnection);
+
+        return req;
+    }
 
     InspectionTask task;
     task.id = req;
@@ -275,6 +316,13 @@ void InspectionScheduler::onWorkerMetadataFinished(const ProbeResult& result)
         return;
     }
 
+    // Populate the cache so future requests for the same file + mtime are
+    // served without spawning a new worker process.
+    if (result.success) {
+        const CacheKey key = MediaCache::makeKey(result.id.filePath);
+        m_cache.putMetadata(key, result.metadata);
+    }
+
     emit metadataReady(result);
     emit inspectionStatusChanged(result.id, result.success ? InspectionStatus::Ready : InspectionStatus::Failed);
 }
@@ -285,6 +333,12 @@ void InspectionScheduler::onWorkerThumbnailFinished(const ThumbnailResult& resul
         // Discard stale or cancelled result
         m_cancelledSerials.remove(result.id.serial);
         return;
+    }
+
+    // Cache successful thumbnails keyed on (filePath, mtime, timestampMs).
+    if (result.success) {
+        const CacheKey key = MediaCache::makeKey(result.id.filePath, result.id.timestampSeconds);
+        m_cache.putThumbnail(key, result.thumbnail);
     }
 
     emit thumbnailReady(result);
