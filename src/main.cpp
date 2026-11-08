@@ -10,6 +10,20 @@
 
 int main(int argc, char *argv[])
 {
+#ifndef Q_OS_WIN
+    // On GNOME/Wayland on modern Linux (e.g. Ubuntu 24.04 / GNOME 46+),
+    // Qt's default gtk3 platform theme initializes GDK which queries the
+    // removed 'antialiasing' key from 'org.gnome.settings-daemon.plugins.xsettings',
+    // crashing with GLib-GIO-ERROR.
+    // Route platform theming through xdgdesktopportal and ensure GDK falls back to X11.
+    if (!qEnvironmentVariableIsSet("QT_QPA_PLATFORMTHEME")) {
+        qputenv("QT_QPA_PLATFORMTHEME", "xdgdesktopportal");
+    }
+    if (!qEnvironmentVariableIsSet("GDK_BACKEND")) {
+        qputenv("GDK_BACKEND", "x11");
+    }
+#endif
+
     QApplication app(argc, argv);
 
     // Override the system highlight/accent color with the app's teal brand color
