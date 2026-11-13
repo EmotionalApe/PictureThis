@@ -4,7 +4,9 @@
 #include <QPixmap>
 #include <QList>
 #include "../media/MediaService.h"
+#include "../media/InspectionTypes.h"
 
+class InspectionScheduler;
 class QListWidget;
 class QListWidgetItem;
 class QLineEdit;
@@ -21,6 +23,8 @@ struct VideoClipEntry {
     VideoMetadata metadata;
     QPixmap thumbnail;
     bool probed = false;
+    RequestId metadataRequestId;
+    RequestId thumbnailRequestId;
 };
 
 class VideoCombineWidget : public QWidget
@@ -30,6 +34,7 @@ class VideoCombineWidget : public QWidget
 public:
     explicit VideoCombineWidget(
         MediaService& mediaService,
+        InspectionScheduler& scheduler,
         QWidget* parent = nullptr
     );
     ~VideoCombineWidget() override = default;
@@ -59,9 +64,12 @@ private slots:
     void onVideoCombineCancelled();
     void onVideoCombineFinished(bool success, const QString& errorMessage);
 
+    // InspectionScheduler signals
+    void onInspectionMetadataReady(const ProbeResult& result);
+    void onInspectionThumbnailReady(const ThumbnailResult& result);
+
 private:
     void addVideoFiles(const QStringList& filePaths);
-    void probeNextUnprobedClip();
     void updateClipItemWidget(int index);
     void updateCompatibilityBanner();
     void updateControlsState();
@@ -72,6 +80,7 @@ private:
     static QString formatFileSize(qint64 bytes);
 
     MediaService& m_mediaService;
+    InspectionScheduler& m_scheduler;
     QList<VideoClipEntry> m_clips;
 
     // Empty state placeholder

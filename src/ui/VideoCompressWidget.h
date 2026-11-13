@@ -3,7 +3,9 @@
 #include <QWidget>
 #include <QPixmap>
 #include "../media/MediaService.h"
+#include "../media/InspectionTypes.h"
 
+class InspectionScheduler;
 class QLineEdit;
 class QLabel;
 class QPushButton;
@@ -24,6 +26,7 @@ class VideoCompressWidget : public QWidget
 public:
     explicit VideoCompressWidget(
         MediaService& mediaService,
+        InspectionScheduler& scheduler,
         QWidget* parent = nullptr
     );
     ~VideoCompressWidget() override = default;
@@ -39,6 +42,7 @@ private slots:
     void chooseOutput();
     void compressVideo();
     void cancelCompression();
+    void onClearClicked();
 
     void onVideoPathChanged(const QString& path);
     void onPercentageSliderChanged(int value);
@@ -53,6 +57,10 @@ private slots:
     void onVideoCompressCancelled();
     void onVideoCompressFinished(bool success, const QString& errorMessage);
 
+    // InspectionScheduler signals
+    void onInspectionMetadataReady(const ProbeResult& result);
+    void onInspectionThumbnailReady(const ThumbnailResult& result);
+
 private:
     void setUiBusy(bool busy);
     void loadVideo(const QString& path);
@@ -63,13 +71,21 @@ private:
     static QString formatDuration(double seconds);
 
     MediaService& m_mediaService;
+    InspectionScheduler& m_scheduler;
     VideoMetadata m_currentMetadata;
     bool m_videoLoaded = false;
     QPixmap m_sourceThumbnailPixmap;
 
+    RequestId m_pendingMetadataId;
+    RequestId m_pendingThumbId;
+
     // Left Column Preview & Summary
     QWidget* m_placeholderCard;
+    QPushButton* m_placeholderAddButton;
     QWidget* m_previewContainer;
+    QWidget* m_previewToolbar;
+    QPushButton* m_chooseVideoButton;
+    QPushButton* m_clearButton;
     QLabel* m_thumbnailLabel;
     QLabel* m_sourceMetadataLabel;
     QLabel* m_compressionSummaryLabel;

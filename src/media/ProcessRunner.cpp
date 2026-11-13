@@ -23,11 +23,38 @@ ProcessRunner::ProcessRunner(QString executable, QObject* parent)
 
     connect(&m_process, &QProcess::readyReadStandardError,
             this, &ProcessRunner::onReadyReadStandardError);
+
+    // --- Cancel escalation timers (single-shot; wired to escalation slots) ---
+    m_gracefulTimer.setSingleShot(true);
+    m_gracefulTimer.setInterval(3000); // 3 s for ffmpeg to respond to 'q'
+    connect(&m_gracefulTimer, &QTimer::timeout,
+            this, &ProcessRunner::onGracefulTimeout);
+
+    m_terminateTimer.setSingleShot(true);
+    m_terminateTimer.setInterval(1000); // 1 s for the process to respond to SIGTERM
+    connect(&m_terminateTimer, &QTimer::timeout,
+            this, &ProcessRunner::onTerminateTimeout);
 }
 
 ProcessRunner::~ProcessRunner()
 {
-    cancel();
+    // Stop timers first so no escalation callbacks fire after destruction begins.
+    m_gracefulTimer.stop();
+    m_terminateTimer.stop();
+
+    if (!isRunning()) {
+        return;
+    }
+
+    // The destructor must be synchronous: QProcess is a value member and must be
+    // fully stopped before it is destroyed. The public cancel() is non-blocking
+    // by design; here we cannot afford that — so we do a fast synchronous teardown.
+    m_process.write("q");
+    m_process.closeWriteChannel();
+    if (!m_process.waitForFinished(1500)) {
+        m_process.kill();
+        m_process.waitForFinished(500);
+    }
 }
 
 bool ProcessRunner::start(const QStringList& arguments)
@@ -35,6 +62,11 @@ bool ProcessRunner::start(const QStringList& arguments)
     if (isRunning()) {
         return false;
     }
+
+    // Reset any stale cancel state from a previous run
+    m_cancelStage = CancelStage::Idle;
+    m_gracefulTimer.stop();
+    m_terminateTimer.stop();
 
     m_standardOutput.clear();
     m_standardError.clear();
@@ -110,39 +142,18 @@ bool ProcessRunner::isRunning() const
 
 void ProcessRunner::cancel()
 {
-    if (!isRunning()) {
-        return;
+    if (!isRunning() || m_cancelStage != CancelStage::Idle) {
+        return; // already stopped, or escalation already in progress
     }
 
-    // Ask ffmpeg to stop gracefully by sending 'q' to its stdin.
-    // ffmpeg monitors stdin for this and will flush and close the output file cleanly.
+    // Stage 1: ask ffmpeg to stop gracefully via its stdin 'q' protocol.
+    // ffmpeg flushes and closes the output file cleanly when it reads 'q'.
+    m_cancelStage = CancelStage::AwaitGraceful;
     m_process.write("q");
     m_process.closeWriteChannel();
 
-    if (m_process.waitForFinished(3000)) {
-        // ffmpeg exited cleanly within 3 seconds — done.
-        return;
-    }
-
-    // ffmpeg didn't respond to 'q' in time — force-kill the entire process tree.
-#if defined(Q_OS_WIN)
-    // taskkill /F /T kills the process AND all its children, which handles
-    // the case where ffmpeg has spawned child processes (e.g. sub-encoders).
-    const qint64 pid = m_process.processId();
-    if (pid > 0) {
-        QProcess::execute(
-            "taskkill",
-            {"/F", "/T", "/PID", QString::number(pid)}
-        );
-    }
-    m_process.waitForFinished(2000);
-#else
-    m_process.terminate();
-    if (!m_process.waitForFinished(1000)) {
-        m_process.kill();
-        m_process.waitForFinished(1000);
-    }
-#endif
+    // If ffmpeg has not exited within 3 s, onGracefulTimeout() escalates to SIGTERM.
+    m_gracefulTimer.start();
 }
 
 QString ProcessRunner::executable() const
@@ -160,6 +171,11 @@ void ProcessRunner::setExecutable(const QString& executable)
 
 void ProcessRunner::onProcessFinished(int exitCode, QProcess::ExitStatus exitStatus)
 {
+    // A process exit — regardless of cause — always terminates the cancel ladder.
+    m_gracefulTimer.stop();
+    m_terminateTimer.stop();
+    m_cancelStage = CancelStage::Idle;
+
     // Flush any remaining lines from buffers
     while (m_process.canReadLine()) {
         const QString line = QString::fromUtf8(m_process.readLine()).trimmed();
@@ -210,4 +226,41 @@ void ProcessRunner::onReadyReadStandardError()
             emit standardErrorLineReceived(line);
         }
     }
+}
+
+void ProcessRunner::onGracefulTimeout()
+{
+    // Stage 2: 'q' timed out — escalate to SIGTERM (POSIX) or immediate kill (Windows).
+    if (m_process.state() == QProcess::NotRunning) {
+        return; // raced: process already exited before the timer fired
+    }
+
+    m_cancelStage = CancelStage::AwaitTerminate;
+
+#if defined(Q_OS_WIN)
+    // Windows does not have SIGTERM. Qt's terminate() maps to TerminateProcess(),
+    // which is effectively a force-kill. Skip directly to AwaitKill stage.
+    // Note: this does not propagate to child processes spawned by ffmpeg; a
+    // taskkill /F /T approach would be needed for that, but keeping the cancel
+    // path non-blocking takes priority here.
+    m_cancelStage = CancelStage::AwaitKill;
+    m_process.kill();
+#else
+    // SIGTERM gives ffmpeg one last chance to flush its output cleanly.
+    m_process.terminate();
+    // If SIGTERM is ignored or the process is stuck, onTerminateTimeout() sends SIGKILL.
+    m_terminateTimer.start();
+#endif
+}
+
+void ProcessRunner::onTerminateTimeout()
+{
+    // Stage 3 (POSIX only): SIGTERM timed out — escalate to SIGKILL.
+    if (m_process.state() == QProcess::NotRunning) {
+        return; // raced: process already exited before the timer fired
+    }
+
+    // SIGKILL cannot be caught or ignored — the process will be terminated unconditionally.
+    m_cancelStage = CancelStage::AwaitKill;
+    m_process.kill();
 }

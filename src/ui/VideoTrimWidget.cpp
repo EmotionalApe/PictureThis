@@ -1,6 +1,7 @@
 #include "VideoTrimWidget.h"
 #include "RangeTimelineWidget.h"
 #include "../media/MediaService.h"
+#include "../media/InspectionScheduler.h"
 
 #include <algorithm>
 #include <QDateTime>
@@ -29,11 +30,17 @@
 
 VideoTrimWidget::VideoTrimWidget(
     MediaService& mediaService,
+    InspectionScheduler& scheduler,
     QWidget* parent)
     : QWidget(parent),
       m_mediaService(mediaService),
+      m_scheduler(scheduler),
       m_placeholderCard(new QWidget(this)),
+      m_placeholderAddButton(new QPushButton("+ Choose Video", this)),
       m_thumbnailsContainer(new QWidget(this)),
+      m_previewToolbar(new QWidget(this)),
+      m_chooseVideoButton(new QPushButton("+ Choose Video", this)),
+      m_clearButton(new QPushButton("Clear", this)),
       m_startThumbnailLabel(new QLabel(this)),
       m_startCaptionLabel(new QLabel("Start: 00:00:00", this)),
       m_endThumbnailLabel(new QLabel(this)),
@@ -81,20 +88,34 @@ VideoTrimWidget::VideoTrimWidget(
     previewHeading->setStyleSheet("font-weight: bold; font-size: 13px; color: palette(window-text);");
     leftLayout->addWidget(previewHeading);
 
-    // Placeholder Card (shown when no video is loaded)
+    // Placeholder Card (shown when no video is loaded, matching Combine tab)
     auto* placeholderLayout = new QVBoxLayout(m_placeholderCard);
-    placeholderLayout->setContentsMargins(0, 0, 0, 0);
+    placeholderLayout->setContentsMargins(20, 24, 20, 24);
+    placeholderLayout->setAlignment(Qt::AlignCenter);
+    placeholderLayout->setSpacing(14);
+
     auto* placeholderLabel = new QLabel(
-        "No video selected\n\nDrag & drop a video file here\nor click Browse",
+        "No video selected\n\nDrag & drop a video file here\nor click below to select a file:",
         m_placeholderCard
     );
     placeholderLabel->setAlignment(Qt::AlignCenter);
-    placeholderLabel->setMinimumSize(280, 200);
-    placeholderLabel->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Expanding);
-    placeholderLabel->setStyleSheet(
-        "border: 2px dashed #888888; border-radius: 8px; background-color: rgba(128, 128, 128, 0.08); padding: 12px; color: #555555;"
-    );
+    placeholderLabel->setStyleSheet("color: #555555; font-size: 12px;");
+
+    m_placeholderAddButton->setStyleSheet("font-weight: bold; padding: 7px 18px;");
+
+    placeholderLayout->addStretch(1);
     placeholderLayout->addWidget(placeholderLabel);
+    placeholderLayout->addWidget(m_placeholderAddButton, 0, Qt::AlignCenter);
+    placeholderLayout->addStretch(1);
+
+    m_placeholderCard->setStyleSheet(
+        "QWidget#placeholderCard {"
+        "    border: 2px dashed #888888;"
+        "    border-radius: 8px;"
+        "    background-color: rgba(128, 128, 128, 0.08);"
+        "}"
+    );
+    m_placeholderCard->setObjectName("placeholderCard");
     leftLayout->addWidget(m_placeholderCard, 1);
 
     // Dual Thumbnails Container (shown once video is loaded)
@@ -148,10 +169,24 @@ VideoTrimWidget::VideoTrimWidget(
         "color: palette(window-text); font-size: 11px; padding: 4px 8px; background: rgba(128, 128, 128, 0.12); border-radius: 4px;"
     );
     m_metadataLabel->setWordWrap(true);
+    m_metadataLabel->setVisible(false);
     leftLayout->addWidget(m_metadataLabel);
 
     // Range Timeline Widget
+    m_timelineWidget->setVisible(false);
     leftLayout->addWidget(m_timelineWidget);
+
+    // Bottom Preview Toolbar (shown when video is loaded)
+    auto* toolbarLayout = new QHBoxLayout(m_previewToolbar);
+    toolbarLayout->setContentsMargins(0, 0, 0, 0);
+    toolbarLayout->setSpacing(6);
+    m_chooseVideoButton->setStyleSheet("font-weight: bold; padding: 5px 12px;");
+    m_clearButton->setStyleSheet("padding: 5px 10px;");
+    toolbarLayout->addWidget(m_chooseVideoButton);
+    toolbarLayout->addStretch(1);
+    toolbarLayout->addWidget(m_clearButton);
+    m_previewToolbar->setVisible(false);
+    leftLayout->addWidget(m_previewToolbar);
 
     // ==================== RIGHT COLUMN: CONTROLS & ACTIONS ====================
     auto* rightWidget = new QWidget(this);
@@ -289,6 +324,15 @@ VideoTrimWidget::VideoTrimWidget(
     rootLayout->addWidget(rightWidget, 1);
 
     // ==================== CONNECTIONS ====================
+    connect(m_placeholderAddButton, &QPushButton::clicked,
+            this, &VideoTrimWidget::chooseVideo);
+
+    connect(m_chooseVideoButton, &QPushButton::clicked,
+            this, &VideoTrimWidget::chooseVideo);
+
+    connect(m_clearButton, &QPushButton::clicked,
+            this, &VideoTrimWidget::onClearClicked);
+
     connect(m_videoButton, &QPushButton::clicked,
             this, &VideoTrimWidget::chooseVideo);
 
@@ -343,6 +387,12 @@ VideoTrimWidget::VideoTrimWidget(
     connect(&m_mediaService, &MediaService::gifExportFinished,
             this, &VideoTrimWidget::onGifExportFinished);
 
+    // InspectionScheduler connections (asynchronous, bounded)
+    connect(&m_scheduler, &InspectionScheduler::metadataReady,
+            this, &VideoTrimWidget::onInspectionMetadataReady);
+    connect(&m_scheduler, &InspectionScheduler::thumbnailReady,
+            this, &VideoTrimWidget::onInspectionThumbnailReady);
+
     updateValidationAndSummary();
 }
 
@@ -386,11 +436,17 @@ void VideoTrimWidget::onVideoPathChanged(const QString& path)
 
 void VideoTrimWidget::loadVideo(const QString& path)
 {
+    m_scheduler.cancelRequestsForPurpose("trim_meta");
+    m_scheduler.cancelRequestsForPurpose("trim_thumb");
+
     if (path.isEmpty() || !QFile::exists(path)) {
         m_videoLoaded = false;
         m_currentMetadata = VideoMetadata();
         m_placeholderCard->setVisible(true);
         m_thumbnailsContainer->setVisible(false);
+        m_metadataLabel->setVisible(false);
+        m_timelineWidget->setVisible(false);
+        m_previewToolbar->setVisible(false);
         m_metadataLabel->setText("No video loaded");
         m_timelineWidget->setRange(0, 0, 0);
         m_startPixmap = QPixmap();
@@ -399,44 +455,69 @@ void VideoTrimWidget::loadVideo(const QString& path)
         return;
     }
 
-    VideoMetadata meta;
-    QString err;
-    if (!m_mediaService.getVideoMetadata(path, meta, &err)) {
+    // Set UI to probing state
+    m_videoLoaded = false;
+    m_placeholderCard->setVisible(true);
+    m_thumbnailsContainer->setVisible(false);
+    m_metadataLabel->setVisible(true);
+    m_timelineWidget->setVisible(false);
+    m_previewToolbar->setVisible(false);
+    m_metadataLabel->setText("Probing video metadata...");
+    m_timelineWidget->setRange(0, 0, 0);
+    m_startPixmap = QPixmap();
+    m_endPixmap = QPixmap();
+    updateValidationAndSummary();
+
+    // Submit non-blocking async metadata request
+    m_pendingMetadataId = m_scheduler.requestMetadata(path, "trim_meta", true);
+}
+
+void VideoTrimWidget::onInspectionMetadataReady(const ProbeResult& result)
+{
+    if (result.id != m_pendingMetadataId) {
+        // Discard stale result if user loaded a different video
+        return;
+    }
+
+    if (!result.success) {
         m_videoLoaded = false;
         m_currentMetadata = VideoMetadata();
         m_placeholderCard->setVisible(true);
         m_thumbnailsContainer->setVisible(false);
-        m_metadataLabel->setText("Could not probe video metadata");
+        m_metadataLabel->setVisible(true);
+        m_timelineWidget->setVisible(false);
+        m_previewToolbar->setVisible(false);
+        m_metadataLabel->setText("Could not probe video metadata: " + result.errorMessage);
         m_timelineWidget->setRange(0, 0, 0);
         updateValidationAndSummary();
         return;
     }
 
-    m_currentMetadata = meta;
+    m_currentMetadata = result.metadata;
     m_videoLoaded = true;
 
     // Display metadata banner
     QString sizeStr;
-    if (meta.fileSizeBytes < 1024 * 1024) {
-        sizeStr = QString("%1 KB").arg(meta.fileSizeBytes / 1024.0, 0, 'f', 1);
+    if (m_currentMetadata.fileSizeBytes < 1024 * 1024) {
+        sizeStr = QString("%1 KB").arg(m_currentMetadata.fileSizeBytes / 1024.0, 0, 'f', 1);
     } else {
-        sizeStr = QString("%1 MB").arg(meta.fileSizeBytes / (1024.0 * 1024.0), 0, 'f', 1);
+        sizeStr = QString("%1 MB").arg(m_currentMetadata.fileSizeBytes / (1024.0 * 1024.0), 0, 'f', 1);
     }
 
-    const QString resStr = (meta.width > 0 && meta.height > 0)
-        ? QString("%1×%2").arg(meta.width).arg(meta.height)
+    const QString resStr = (m_currentMetadata.width > 0 && m_currentMetadata.height > 0)
+        ? QString("%1×%2").arg(m_currentMetadata.width).arg(m_currentMetadata.height)
         : "Unknown res";
 
-    const QString videoCodec = meta.videoCodec.isEmpty() ? "Unknown" : meta.videoCodec.toUpper();
-    const QString audioCodec = meta.audioCodec.isEmpty() ? "None" : meta.audioCodec.toUpper();
-    const QString durStr = formatDuration(meta.durationSeconds);
+    const QString videoCodec = m_currentMetadata.videoCodec.isEmpty() ? "Unknown" : m_currentMetadata.videoCodec.toUpper();
+    const QString audioCodec = m_currentMetadata.audioCodec.isEmpty() ? "None" : m_currentMetadata.audioCodec.toUpper();
+    const QString durStr = formatDuration(m_currentMetadata.durationSeconds);
 
     m_metadataLabel->setText(
         QString("%1 · %2 / %3 · %4 · %5").arg(resStr, videoCodec, audioCodec, durStr, sizeStr)
     );
 
     // Setup TimeEdits range and values
-    const QTime maxTime = secondsToQTime(meta.durationSeconds);
+    const QTime maxTime = secondsToQTime(m_currentMetadata.durationSeconds);
     m_startTimeEdit->setMaximumTime(maxTime);
     m_endTimeEdit->setMaximumTime(maxTime);
 
@@ -444,10 +525,10 @@ void VideoTrimWidget::loadVideo(const QString& path)
     m_endTimeEdit->setTime(maxTime);
 
     // Setup timeline
-    m_timelineWidget->setRange(0.0, meta.durationSeconds, meta.durationSeconds);
+    m_timelineWidget->setRange(0.0, m_currentMetadata.durationSeconds, m_currentMetadata.durationSeconds);
 
     // Auto-suggest output path if empty or default
-    const QFileInfo fileInfo(path);
+    const QFileInfo fileInfo(m_videoPath->text().trimmed());
     const bool isGif = (m_formatComboBox->currentIndex() == 1);
     const QString ext = isGif ? "gif" : "mp4";
     const QString suggestedOut = fileInfo.dir().filePath(
@@ -458,6 +539,9 @@ void VideoTrimWidget::loadVideo(const QString& path)
     // Switch view to thumbnails
     m_placeholderCard->setVisible(false);
     m_thumbnailsContainer->setVisible(true);
+    m_metadataLabel->setVisible(true);
+    m_timelineWidget->setVisible(true);
+    m_previewToolbar->setVisible(true);
 
     updateValidationAndSummary();
     requestThumbnailUpdate();
@@ -530,6 +614,10 @@ void VideoTrimWidget::requestThumbnailUpdate()
     if (!m_videoLoaded) {
         return;
     }
+    // Invalidate any in-flight or pending thumbnail work for this widget.
+    // Any updateThumbnails() call already underway will see a mismatched
+    // serial and discard its result before touching the UI.
+    ++m_thumbSerial;
     m_thumbnailTimer->start();
 }
 
@@ -545,44 +633,61 @@ void VideoTrimWidget::updateThumbnails()
         return;
     }
 
+    // Cancel older in-flight thumbnail tasks for this widget
+    m_scheduler.cancelRequestsForPurpose("trim_thumb");
+
     const double startSec = qTimeToSeconds(m_startTimeEdit->time());
-    const double endSec = qTimeToSeconds(m_endTimeEdit->time());
-
-    QPixmap startPix;
-    if (m_mediaService.extractThumbnail(path, startSec, startPix)) {
-        m_startPixmap = startPix;
-    }
-
-    QPixmap endPix;
-    if (m_mediaService.extractThumbnail(path, endSec, endPix)) {
-        m_endPixmap = endPix;
-    }
+    const double endSec   = qTimeToSeconds(m_endTimeEdit->time());
 
     m_startCaptionLabel->setText(QString("Start: %1").arg(formatDuration(startSec)));
     m_endCaptionLabel->setText(QString("End: %1").arg(formatDuration(endSec)));
 
-    renderThumbnails();
+    // Request start and end thumbnails at full source resolution (0, 0)
+    // so scaling down to the preview boxes is crisp and sharp
+    m_pendingStartThumbId = m_scheduler.requestThumbnail(path, startSec, 0, 0, "trim_thumb", true);
+    m_pendingEndThumbId   = m_scheduler.requestThumbnail(path, endSec, 0, 0, "trim_thumb", true);
+}
+
+void VideoTrimWidget::onInspectionThumbnailReady(const ThumbnailResult& result)
+{
+    if (result.id == m_pendingStartThumbId) {
+        if (result.success && !result.thumbnail.isNull()) {
+            m_startPixmap = result.thumbnail;
+            renderThumbnails();
+        }
+    } else if (result.id == m_pendingEndThumbId) {
+        if (result.success && !result.thumbnail.isNull()) {
+            m_endPixmap = result.thumbnail;
+            renderThumbnails();
+        }
+    }
 }
 
 void VideoTrimWidget::renderThumbnails()
 {
+    const qreal dpr = devicePixelRatioF();
+
     if (!m_startPixmap.isNull()) {
-        const QSize targetSize = m_startThumbnailLabel->size() - QSize(8, 8);
+        const QSize targetSize = (m_startThumbnailLabel->size() - QSize(8, 8)) * dpr;
         if (targetSize.width() > 0 && targetSize.height() > 0) {
-            m_startThumbnailLabel->setPixmap(
-                m_startPixmap.scaled(targetSize, Qt::KeepAspectRatio, Qt::SmoothTransformation)
+            QPixmap scaled = m_startPixmap.scaled(
+                targetSize, Qt::KeepAspectRatio, Qt::SmoothTransformation
             );
+            scaled.setDevicePixelRatio(dpr);
+            m_startThumbnailLabel->setPixmap(scaled);
         }
     } else {
         m_startThumbnailLabel->setText("No preview");
     }
 
     if (!m_endPixmap.isNull()) {
-        const QSize targetSize = m_endThumbnailLabel->size() - QSize(8, 8);
+        const QSize targetSize = (m_endThumbnailLabel->size() - QSize(8, 8)) * dpr;
         if (targetSize.width() > 0 && targetSize.height() > 0) {
-            m_endThumbnailLabel->setPixmap(
-                m_endPixmap.scaled(targetSize, Qt::KeepAspectRatio, Qt::SmoothTransformation)
+            QPixmap scaled = m_endPixmap.scaled(
+                targetSize, Qt::KeepAspectRatio, Qt::SmoothTransformation
             );
+            scaled.setDevicePixelRatio(dpr);
+            m_endThumbnailLabel->setPixmap(scaled);
         }
     } else {
         m_endThumbnailLabel->setText("No preview");
@@ -755,10 +860,22 @@ void VideoTrimWidget::cancelTrim()
     m_mediaService.cancel();
 }
 
+void VideoTrimWidget::onClearClicked()
+{
+    m_scheduler.cancelRequestsForPurpose("trim_meta");
+    m_scheduler.cancelRequestsForPurpose("trim_thumb");
+    m_videoPath->clear();
+    m_outputPath->clear();
+    loadVideo("");
+}
+
 void VideoTrimWidget::setUiBusy(bool busy)
 {
     m_trimButton->setEnabled(!busy);
     m_cancelButton->setEnabled(busy);
+    m_placeholderAddButton->setEnabled(!busy);
+    m_chooseVideoButton->setEnabled(!busy);
+    m_clearButton->setEnabled(!busy);
     m_videoButton->setEnabled(!busy);
     m_videoPath->setEnabled(!busy);
     m_startTimeEdit->setEnabled(!busy);

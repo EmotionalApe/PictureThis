@@ -1,5 +1,6 @@
 #include "VideoCombineWidget.h"
 #include "../media/MediaService.h"
+#include "../media/InspectionScheduler.h"
 
 #include <algorithm>
 #include <QCoreApplication>
@@ -28,9 +29,11 @@
 
 VideoCombineWidget::VideoCombineWidget(
     MediaService& mediaService,
+    InspectionScheduler& scheduler,
     QWidget* parent)
     : QWidget(parent),
       m_mediaService(mediaService),
+      m_scheduler(scheduler),
       m_placeholderCard(new QWidget(this)),
       m_placeholderAddButton(new QPushButton("+ Add Videos", this)),
       m_clipListWidget(new QListWidget(this)),
@@ -239,6 +242,10 @@ VideoCombineWidget::VideoCombineWidget(
     connect(&m_mediaService, &MediaService::videoCombineCancelled, this, &VideoCombineWidget::onVideoCombineCancelled);
     connect(&m_mediaService, &MediaService::videoCombineFinished, this, &VideoCombineWidget::onVideoCombineFinished);
 
+    // InspectionScheduler connections (asynchronous, bounded pipeline)
+    connect(&m_scheduler, &InspectionScheduler::metadataReady, this, &VideoCombineWidget::onInspectionMetadataReady);
+    connect(&m_scheduler, &InspectionScheduler::thumbnailReady, this, &VideoCombineWidget::onInspectionThumbnailReady);
+
     updateCompatibilityBanner();
     updateControlsState();
 }
@@ -316,11 +323,14 @@ void VideoCombineWidget::addVideoFiles(const QStringList& filePaths)
         p.drawText(placeholder.rect(), Qt::AlignCenter, "Video");
         entry.thumbnail = placeholder;
 
+        // Submit non-blocking async metadata probe request to bounded scheduler
+        entry.metadataRequestId = m_scheduler.requestMetadata(path, "combine_meta");
+
         m_clips.append(entry);
 
         auto* item = new QListWidgetItem(m_clipListWidget);
         item->setIcon(QIcon(entry.thumbnail));
-        item->setText(QString("%1. %2\nProbing metadata...")
+        item->setText(QString("%1. %2\nQueued for inspection...")
                           .arg(m_clips.size())
                           .arg(QFileInfo(path).fileName()));
     }
@@ -331,46 +341,54 @@ void VideoCombineWidget::addVideoFiles(const QStringList& filePaths)
 
     suggestDefaultOutputPath();
     updateControlsState();
-    probeNextUnprobedClip();
+    updateCompatibilityBanner();
 }
 
-void VideoCombineWidget::probeNextUnprobedClip()
+void VideoCombineWidget::onInspectionMetadataReady(const ProbeResult& result)
 {
-    int unprobedIndex = -1;
     for (int i = 0; i < m_clips.size(); ++i) {
-        if (!m_clips[i].probed) {
-            unprobedIndex = i;
+        if (m_clips[i].metadataRequestId == result.id) {
+            VideoClipEntry& entry = m_clips[i];
+            entry.probed = true;
+
+            if (result.success) {
+                entry.metadata = result.metadata;
+                updateClipItemWidget(i);
+                updateCompatibilityBanner();
+                updateControlsState();
+
+                // Extract thumbnail at 10% of duration asynchronously
+                const double thumbTs = std::max(0.1, entry.metadata.durationSeconds * 0.1);
+                entry.thumbnailRequestId = m_scheduler.requestThumbnail(
+                    entry.filePath, thumbTs, 320, 180, "combine_thumb"
+                );
+            } else {
+                if (i < m_clipListWidget->count()) {
+                    auto* item = m_clipListWidget->item(i);
+                    item->setText(QString("%1. %2\nInspection error: %3")
+                                      .arg(i + 1)
+                                      .arg(QFileInfo(entry.filePath).fileName())
+                                      .arg(result.errorMessage));
+                }
+                updateCompatibilityBanner();
+                updateControlsState();
+            }
             break;
         }
     }
+}
 
-    if (unprobedIndex == -1) {
-        // All probed
-        updateCompatibilityBanner();
-        updateControlsState();
-        return;
+void VideoCombineWidget::onInspectionThumbnailReady(const ThumbnailResult& result)
+{
+    for (int i = 0; i < m_clips.size(); ++i) {
+        if (m_clips[i].thumbnailRequestId == result.id) {
+            if (result.success && !result.thumbnail.isNull()) {
+                m_clips[i].thumbnail = result.thumbnail;
+                updateClipItemWidget(i);
+            }
+            break;
+        }
     }
-
-    // Schedule probe asynchronously to keep UI buttery smooth
-    QTimer::singleShot(10, this, [this, unprobedIndex]() {
-        if (unprobedIndex >= m_clips.size()) {
-            return;
-        }
-
-        VideoClipEntry& entry = m_clips[unprobedIndex];
-        m_mediaService.getVideoMetadata(entry.filePath, entry.metadata);
-
-        // Extract thumbnail at 10% of duration
-        const double thumbTs = std::max(0.1, entry.metadata.durationSeconds * 0.1);
-        QPixmap thumb;
-        if (m_mediaService.extractThumbnail(entry.filePath, thumbTs, thumb)) {
-            entry.thumbnail = thumb.scaled(320, 180, Qt::KeepAspectRatio, Qt::SmoothTransformation);
-        }
-
-        entry.probed = true;
-        updateClipItemWidget(unprobedIndex);
-        probeNextUnprobedClip();
-    });
 }
 
 void VideoCombineWidget::updateClipItemWidget(int index)
@@ -552,6 +570,8 @@ void VideoCombineWidget::onRemoveSelectedClicked()
 {
     const int row = m_clipListWidget->currentRow();
     if (row >= 0 && row < m_clips.size()) {
+        m_scheduler.cancelRequest(m_clips[row].metadataRequestId);
+        m_scheduler.cancelRequest(m_clips[row].thumbnailRequestId);
         m_clips.removeAt(row);
         delete m_clipListWidget->takeItem(row);
 
@@ -571,6 +591,8 @@ void VideoCombineWidget::onClearAllClicked()
         return;
     }
 
+    m_scheduler.cancelRequestsForPurpose("combine_meta");
+    m_scheduler.cancelRequestsForPurpose("combine_thumb");
     m_clips.clear();
     m_clipListWidget->clear();
 

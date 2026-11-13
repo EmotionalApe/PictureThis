@@ -3,6 +3,7 @@
 #include <QMainWindow>
 
 class MediaService;
+class InspectionScheduler;
 class ImageAudioWidget;
 class VideoTrimWidget;
 class VideoCombineWidget;
@@ -19,6 +20,7 @@ class MainWindow : public QMainWindow
 public:
     explicit MainWindow(
         MediaService& mediaService,
+        InspectionScheduler& scheduler,
         QWidget* parent = nullptr
     );
     ~MainWindow() override = default;
@@ -39,6 +41,7 @@ private:
     QWidget* createAlertBanner();
 
     MediaService& m_mediaService;
+    InspectionScheduler& m_scheduler;
     QTabWidget* m_tabWidget;
     ImageAudioWidget* m_imageAudioWidget;
     VideoTrimWidget* m_videoTrimWidget;

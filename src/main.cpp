@@ -6,9 +6,24 @@
 #include "media/MediaService.h"
 #include "media/ProcessRunner.h"
 #include "media/ExecutableLocator.h"
+#include "media/InspectionScheduler.h"
 
 int main(int argc, char *argv[])
 {
+#ifndef Q_OS_WIN
+    // On GNOME/Wayland on modern Linux (e.g. Ubuntu 24.04 / GNOME 46+),
+    // Qt's default gtk3 platform theme initializes GDK which queries the
+    // removed 'antialiasing' key from 'org.gnome.settings-daemon.plugins.xsettings',
+    // crashing with GLib-GIO-ERROR.
+    // Route platform theming through xdgdesktopportal and ensure GDK falls back to X11.
+    if (!qEnvironmentVariableIsSet("QT_QPA_PLATFORMTHEME")) {
+        qputenv("QT_QPA_PLATFORMTHEME", "xdgdesktopportal");
+    }
+    if (!qEnvironmentVariableIsSet("GDK_BACKEND")) {
+        qputenv("GDK_BACKEND", "x11");
+    }
+#endif
+
     QApplication app(argc, argv);
 
     // Override the system highlight/accent color with the app's teal brand color
@@ -29,12 +44,16 @@ int main(int argc, char *argv[])
     const ToolStatus ffmpegStatus = ExecutableLocator::locateFfmpeg();
     const ToolStatus ffprobeStatus = ExecutableLocator::locateFfprobe();
 
-    ProcessRunner ffmpeg(ffmpegStatus.isValid ? ffmpegStatus.executablePath : "ffmpeg");
-    ProcessRunner ffprobe(ffprobeStatus.isValid ? ffprobeStatus.executablePath : "ffprobe");
+    const QString ffmpegPath = ffmpegStatus.isValid ? ffmpegStatus.executablePath : "ffmpeg";
+    const QString ffprobePath = ffprobeStatus.isValid ? ffprobeStatus.executablePath : "ffprobe";
+
+    ProcessRunner ffmpeg(ffmpegPath);
+    ProcessRunner ffprobe(ffprobePath);
 
     MediaService mediaService(ffmpeg, ffprobe);
+    InspectionScheduler inspectionScheduler(ffmpegPath, ffprobePath, 2);
 
-    MainWindow window(mediaService);
+    MainWindow window(mediaService, inspectionScheduler);
     window.show();
 
     return app.exec();

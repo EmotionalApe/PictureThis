@@ -32,6 +32,13 @@ ImageAudioWidget::ImageAudioWidget(
     QWidget* parent)
     : QWidget(parent),
       m_mediaService(mediaService),
+      m_placeholderCard(new QWidget(this)),
+      m_placeholderChooseButton(new QPushButton("+ Choose Image", this)),
+      m_placeholderPasteButton(new QPushButton("📋 Paste", this)),
+      m_previewContainer(new QWidget(this)),
+      m_previewToolbar(new QWidget(this)),
+      m_chooseImageButton(new QPushButton("+ Choose Image", this)),
+      m_clearImageButton(new QPushButton("Clear", this)),
       m_previewLabel(new QLabel(this)),
       m_imageInfoLabel(new QLabel("No image loaded", this)),
       m_imagePath(new QLineEdit(this)),
@@ -40,6 +47,7 @@ ImageAudioWidget::ImageAudioWidget(
       m_imageButton(new QPushButton("Browse...", this)),
       m_pasteButton(new QPushButton("Paste", this)),
       m_audioButton(new QPushButton("Browse...", this)),
+      m_audioClearButton(new QPushButton("✕", this)),
       m_audioInfoLabel(new QLabel(this)),
       m_outputButton(new QPushButton("Browse...", this)),
       m_createButton(new QPushButton("Create Video", this)),
@@ -63,20 +71,76 @@ ImageAudioWidget::ImageAudioWidget(
     previewHeading->setStyleSheet("font-weight: bold; font-size: 13px; color: palette(window-text);");
     leftLayout->addWidget(previewHeading);
 
-    m_previewLabel->setAlignment(Qt::AlignCenter);
-    m_previewLabel->setMinimumSize(260, 260);
-    m_previewLabel->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Expanding);
-    m_previewLabel->setWordWrap(true);
-    m_previewLabel->setText("No image selected\n\nDrag & drop an image or audio here\nor click Paste");
-    m_previewLabel->setStyleSheet(
-        "border: 2px dashed #888888; border-radius: 8px; background-color: rgba(128, 128, 128, 0.08); padding: 12px; color: #555555;"
+    // Placeholder Card (shown when no image is loaded)
+    auto* placeholderLayout = new QVBoxLayout(m_placeholderCard);
+    placeholderLayout->setContentsMargins(20, 24, 20, 24);
+    placeholderLayout->setAlignment(Qt::AlignCenter);
+    placeholderLayout->setSpacing(14);
+
+    auto* placeholderLabel = new QLabel(
+        "No image selected\n\nDrag & drop an image or audio file here\nor choose an option below:",
+        m_placeholderCard
     );
-    leftLayout->addWidget(m_previewLabel, 1);
+    placeholderLabel->setAlignment(Qt::AlignCenter);
+    placeholderLabel->setStyleSheet("color: #555555; font-size: 12px;");
+
+    m_placeholderChooseButton->setStyleSheet("font-weight: bold; padding: 7px 18px;");
+    m_placeholderPasteButton->setStyleSheet("padding: 7px 14px;");
+
+    auto* btnRow = new QHBoxLayout();
+    btnRow->setSpacing(8);
+    btnRow->addStretch(1);
+    btnRow->addWidget(m_placeholderChooseButton);
+    btnRow->addWidget(m_placeholderPasteButton);
+    btnRow->addStretch(1);
+
+    placeholderLayout->addStretch(1);
+    placeholderLayout->addWidget(placeholderLabel);
+    placeholderLayout->addLayout(btnRow);
+    placeholderLayout->addStretch(1);
+
+    m_placeholderCard->setStyleSheet(
+        "QWidget#placeholderCard {"
+        "    border: 2px dashed #888888;"
+        "    border-radius: 8px;"
+        "    background-color: rgba(128, 128, 128, 0.08);"
+        "}"
+    );
+    m_placeholderCard->setObjectName("placeholderCard");
+    leftLayout->addWidget(m_placeholderCard, 1);
+
+    // Preview Container (shown once image is loaded)
+    auto* previewContainerLayout = new QVBoxLayout(m_previewContainer);
+    previewContainerLayout->setContentsMargins(0, 0, 0, 0);
+    previewContainerLayout->setSpacing(6);
+
+    m_previewLabel->setAlignment(Qt::AlignCenter);
+    m_previewLabel->setMinimumSize(260, 200);
+    m_previewLabel->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Expanding);
+    m_previewLabel->setStyleSheet(
+        "border: 1px solid palette(mid); border-radius: 6px; background-color: rgba(128, 128, 128, 0.08);"
+    );
+    previewContainerLayout->addWidget(m_previewLabel, 1);
 
     m_imageInfoLabel->setAlignment(Qt::AlignCenter);
     m_imageInfoLabel->setStyleSheet("color: palette(window-text); font-size: 11px;");
     m_imageInfoLabel->setWordWrap(true);
-    leftLayout->addWidget(m_imageInfoLabel);
+    previewContainerLayout->addWidget(m_imageInfoLabel);
+
+    m_previewContainer->hide();
+    leftLayout->addWidget(m_previewContainer, 1);
+
+    // Bottom Preview Toolbar (shown when image is loaded)
+    auto* toolbarLayout = new QHBoxLayout(m_previewToolbar);
+    toolbarLayout->setContentsMargins(0, 0, 0, 0);
+    toolbarLayout->setSpacing(6);
+    m_chooseImageButton->setStyleSheet("font-weight: bold; padding: 5px 12px;");
+    m_clearImageButton->setStyleSheet("padding: 5px 10px;");
+    toolbarLayout->addWidget(m_chooseImageButton);
+    toolbarLayout->addStretch(1);
+    toolbarLayout->addWidget(m_clearImageButton);
+    m_previewToolbar->hide();
+    leftLayout->addWidget(m_previewToolbar);
 
     // --- Right column: Inputs, Actions, Progress ---
     auto* rightWidget = new QWidget(this);
@@ -99,6 +163,10 @@ ImageAudioWidget::ImageAudioWidget(
     auto* audioLayout = new QHBoxLayout();
     audioLayout->addWidget(m_audioPath);
     audioLayout->addWidget(m_audioButton);
+    m_audioClearButton->setStyleSheet("padding: 5px 10px;");
+    m_audioClearButton->setToolTip("Clear Audio");
+    m_audioClearButton->setEnabled(false);
+    audioLayout->addWidget(m_audioClearButton);
 
     m_audioInfoLabel->setStyleSheet("color: palette(window-text); font-size: 11px;");
 
@@ -141,6 +209,21 @@ ImageAudioWidget::ImageAudioWidget(
     rootLayout->addWidget(rightWidget, 1);
 
     // Wire up events and connections
+    connect(m_placeholderChooseButton, &QPushButton::clicked,
+            this, &ImageAudioWidget::chooseImage);
+
+    connect(m_placeholderPasteButton, &QPushButton::clicked,
+            this, &ImageAudioWidget::pasteImageFromClipboard);
+
+    connect(m_chooseImageButton, &QPushButton::clicked,
+            this, &ImageAudioWidget::chooseImage);
+
+    connect(m_clearImageButton, &QPushButton::clicked,
+            this, &ImageAudioWidget::onClearImageClicked);
+
+    connect(m_audioClearButton, &QPushButton::clicked,
+            this, &ImageAudioWidget::onClearAudioClicked);
+
     connect(m_imageButton, &QPushButton::clicked,
             this, &ImageAudioWidget::chooseImage);
 
@@ -259,6 +342,9 @@ void ImageAudioWidget::updateImagePreview(const QString& path)
         m_loadedPixmap = QPixmap();
         renderPreviewThumbnail();
         m_imageInfoLabel->setText("No image loaded");
+        m_placeholderCard->show();
+        m_previewContainer->hide();
+        m_previewToolbar->hide();
         return;
     }
 
@@ -271,10 +357,16 @@ void ImageAudioWidget::updateImagePreview(const QString& path)
             "border: 2px dashed #cc4444; border-radius: 8px; background-color: rgba(200, 50, 50, 0.06); padding: 12px; color: #aa2222;"
         );
         m_imageInfoLabel->setText("Unsupported image format");
+        m_placeholderCard->hide();
+        m_previewContainer->show();
+        m_previewToolbar->show();
         return;
     }
 
     m_loadedPixmap = QPixmap::fromImage(img);
+    m_placeholderCard->hide();
+    m_previewContainer->show();
+    m_previewToolbar->show();
     renderPreviewThumbnail();
 
     const int w = img.width();
@@ -304,35 +396,33 @@ void ImageAudioWidget::renderPreviewThumbnail()
 {
     if (m_loadedPixmap.isNull()) {
         m_previewLabel->setPixmap(QPixmap());
-        m_previewLabel->setText("No image selected\n\nDrag & drop an image or audio here\nor click Paste");
-        m_previewLabel->setStyleSheet(
-            "border: 2px dashed #888888; border-radius: 8px; background-color: rgba(128, 128, 128, 0.08); padding: 12px; color: #555555;"
-        );
         return;
     }
 
-    const QSize targetSize = m_previewLabel->size() - QSize(16, 16);
+    const qreal dpr = devicePixelRatioF();
+    const QSize targetSize = (m_previewLabel->size() - QSize(16, 16)) * dpr;
     if (targetSize.width() <= 0 || targetSize.height() <= 0) {
         return;
     }
 
-    const QPixmap scaled = m_loadedPixmap.scaled(
+    QPixmap scaled = m_loadedPixmap.scaled(
         targetSize,
         Qt::KeepAspectRatio,
         Qt::SmoothTransformation
     );
+    scaled.setDevicePixelRatio(dpr);
     m_previewLabel->setPixmap(scaled);
-    m_previewLabel->setStyleSheet(
-        "border: 1px solid #aaaaaa; border-radius: 8px; background-color: rgba(0, 0, 0, 0.03); padding: 4px;"
-    );
 }
 
 void ImageAudioWidget::updateAudioDetails(const QString& path)
 {
     if (path.isEmpty() || !QFile::exists(path)) {
         m_audioInfoLabel->setText("");
+        m_audioClearButton->setEnabled(false);
         return;
     }
+
+    m_audioClearButton->setEnabled(!m_mediaService.isProcessing());
 
     double duration = 0.0;
     QString errorMessage;
@@ -496,13 +586,29 @@ void ImageAudioWidget::resizeEvent(QResizeEvent* event)
     }
 }
 
+void ImageAudioWidget::onClearImageClicked()
+{
+    cleanupPastedTempFile();
+    setImagePath("");
+}
+
+void ImageAudioWidget::onClearAudioClicked()
+{
+    setAudioPath("");
+}
+
 void ImageAudioWidget::setUiBusy(bool busy)
 {
+    m_placeholderChooseButton->setEnabled(!busy);
+    m_placeholderPasteButton->setEnabled(!busy);
+    m_chooseImageButton->setEnabled(!busy);
+    m_clearImageButton->setEnabled(!busy);
     m_createButton->setEnabled(!busy);
     m_cancelButton->setEnabled(busy);
     m_imageButton->setEnabled(!busy);
     m_pasteButton->setEnabled(!busy);
     m_audioButton->setEnabled(!busy);
+    m_audioClearButton->setEnabled(!busy && !m_audioPath->text().isEmpty());
     m_outputButton->setEnabled(!busy);
 
     m_imagePath->setEnabled(!busy);

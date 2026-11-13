@@ -1,5 +1,6 @@
 #include "VideoCompressWidget.h"
 #include "../media/MediaService.h"
+#include "../media/InspectionScheduler.h"
 
 #include <algorithm>
 #include <QDateTime>
@@ -28,11 +29,17 @@
 
 VideoCompressWidget::VideoCompressWidget(
     MediaService& mediaService,
+    InspectionScheduler& scheduler,
     QWidget* parent)
     : QWidget(parent),
       m_mediaService(mediaService),
+      m_scheduler(scheduler),
       m_placeholderCard(new QWidget(this)),
+      m_placeholderAddButton(new QPushButton("+ Choose Video", this)),
       m_previewContainer(new QWidget(this)),
+      m_previewToolbar(new QWidget(this)),
+      m_chooseVideoButton(new QPushButton("+ Choose Video", this)),
+      m_clearButton(new QPushButton("Clear", this)),
       m_thumbnailLabel(new QLabel(this)),
       m_sourceMetadataLabel(new QLabel("No video loaded", this)),
       m_compressionSummaryLabel(new QLabel(this)),
@@ -74,18 +81,32 @@ VideoCompressWidget::VideoCompressWidget(
 
     // Placeholder Card (shown when no video is loaded)
     auto* placeholderLayout = new QVBoxLayout(m_placeholderCard);
-    placeholderLayout->setContentsMargins(0, 0, 0, 0);
+    placeholderLayout->setContentsMargins(20, 24, 20, 24);
+    placeholderLayout->setAlignment(Qt::AlignCenter);
+    placeholderLayout->setSpacing(14);
+
     auto* placeholderLabel = new QLabel(
-        "No video selected\n\nDrag & drop a video file here\nor click Browse",
+        "No video selected\n\nDrag & drop a video file here\nor click below to select a file:",
         m_placeholderCard
     );
     placeholderLabel->setAlignment(Qt::AlignCenter);
-    placeholderLabel->setMinimumSize(280, 200);
-    placeholderLabel->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Expanding);
-    placeholderLabel->setStyleSheet(
-        "border: 2px dashed #888888; border-radius: 8px; background-color: rgba(128, 128, 128, 0.08); padding: 12px; color: #555555;"
-    );
+    placeholderLabel->setStyleSheet("color: #555555; font-size: 12px;");
+
+    m_placeholderAddButton->setStyleSheet("font-weight: bold; padding: 7px 18px;");
+
+    placeholderLayout->addStretch(1);
     placeholderLayout->addWidget(placeholderLabel);
+    placeholderLayout->addWidget(m_placeholderAddButton, 0, Qt::AlignCenter);
+    placeholderLayout->addStretch(1);
+
+    m_placeholderCard->setStyleSheet(
+        "QWidget#placeholderCard {"
+        "    border: 2px dashed #888888;"
+        "    border-radius: 8px;"
+        "    background-color: rgba(128, 128, 128, 0.08);"
+        "}"
+    );
+    m_placeholderCard->setObjectName("placeholderCard");
     leftLayout->addWidget(m_placeholderCard, 1);
 
     // Preview Container (shown once video is loaded)
@@ -123,6 +144,18 @@ VideoCompressWidget::VideoCompressWidget(
 
     m_previewContainer->hide();
     leftLayout->addWidget(m_previewContainer, 1);
+
+    // Bottom Preview Toolbar (shown when video is loaded)
+    auto* toolbarLayout = new QHBoxLayout(m_previewToolbar);
+    toolbarLayout->setContentsMargins(0, 0, 0, 0);
+    toolbarLayout->setSpacing(6);
+    m_chooseVideoButton->setStyleSheet("font-weight: bold; padding: 5px 12px;");
+    m_clearButton->setStyleSheet("padding: 5px 10px;");
+    toolbarLayout->addWidget(m_chooseVideoButton);
+    toolbarLayout->addStretch(1);
+    toolbarLayout->addWidget(m_clearButton);
+    m_previewToolbar->hide();
+    leftLayout->addWidget(m_previewToolbar);
 
     // ==================== RIGHT COLUMN: SETTINGS & CONTROLS ====================
     auto* rightWidget = new QWidget(this);
@@ -273,10 +306,17 @@ VideoCompressWidget::VideoCompressWidget(
     m_statusLabel->setStyleSheet("font-size: 11px; color: palette(mid);");
     rightLayout->addWidget(m_statusLabel);
 
-    rootLayout->addWidget(leftWidget, 5);
-    rootLayout->addWidget(rightWidget, 6);
+    // Assemble root two-column layout (balanced 1:1 split matching all tabs)
+    leftWidget->setSizePolicy(QSizePolicy::Ignored, QSizePolicy::Preferred);
+    rightWidget->setSizePolicy(QSizePolicy::Ignored, QSizePolicy::Preferred);
+    rootLayout->addWidget(leftWidget, 1);
+    rootLayout->addWidget(rightWidget, 1);
 
     // ==================== CONNECTIONS ====================
+    connect(m_placeholderAddButton, &QPushButton::clicked, this, &VideoCompressWidget::chooseVideo);
+    connect(m_chooseVideoButton, &QPushButton::clicked, this, &VideoCompressWidget::chooseVideo);
+    connect(m_clearButton, &QPushButton::clicked, this, &VideoCompressWidget::onClearClicked);
+
     connect(m_videoButton, &QPushButton::clicked, this, &VideoCompressWidget::chooseVideo);
     connect(m_outputButton, &QPushButton::clicked, this, &VideoCompressWidget::chooseOutput);
     connect(m_videoPath, &QLineEdit::textChanged, this, &VideoCompressWidget::onVideoPathChanged);
@@ -300,6 +340,10 @@ VideoCompressWidget::VideoCompressWidget(
     connect(&m_mediaService, &MediaService::compressStatusChanged, this, &VideoCompressWidget::onCompressStatusChanged);
     connect(&m_mediaService, &MediaService::videoCompressCancelled, this, &VideoCompressWidget::onVideoCompressCancelled);
     connect(&m_mediaService, &MediaService::videoCompressFinished, this, &VideoCompressWidget::onVideoCompressFinished);
+
+    // InspectionScheduler connections (asynchronous, bounded pipeline)
+    connect(&m_scheduler, &InspectionScheduler::metadataReady, this, &VideoCompressWidget::onInspectionMetadataReady);
+    connect(&m_scheduler, &InspectionScheduler::thumbnailReady, this, &VideoCompressWidget::onInspectionThumbnailReady);
 
     updateCompressionCalculations();
 }
@@ -372,6 +416,11 @@ void VideoCompressWidget::onVideoPathChanged(const QString& path)
 
 void VideoCompressWidget::loadVideo(const QString& path)
 {
+    m_scheduler.cancelRequestsForPurpose("compress_meta");
+    m_scheduler.cancelRequestsForPurpose("compress_thumb");
+    m_pendingMetadataId = RequestId();
+    m_pendingThumbId = RequestId();
+
     m_videoLoaded = false;
     m_sourceThumbnailPixmap = QPixmap();
     m_thumbnailLabel->clear();
@@ -380,28 +429,56 @@ void VideoCompressWidget::loadVideo(const QString& path)
         m_currentMetadata = VideoMetadata();
         m_placeholderCard->show();
         m_previewContainer->hide();
+        m_previewToolbar->hide();
         m_sourceMetadataLabel->setText("No video loaded");
+        m_statusLabel->setText("");
         updateCompressionCalculations();
         return;
     }
 
-    QString probeError;
-    if (!m_mediaService.getVideoMetadata(path, m_currentMetadata, &probeError)) {
-        m_placeholderCard->show();
-        m_previewContainer->hide();
-        m_statusLabel->setText(QString("Probe error: %1").arg(probeError));
-        updateCompressionCalculations();
-        return;
-    }
-
-    m_videoLoaded = true;
+    // Set UI to probing state
     m_placeholderCard->hide();
     m_previewContainer->show();
+    m_previewToolbar->show();
+    m_sourceMetadataLabel->setText("Probing video metadata...");
+    m_statusLabel->setText("Analyzing video streams...");
+
+    // Auto-generate output filename if blank or matching previous default
+    const QFileInfo fileInfo(path);
+    const QString defaultOutput = fileInfo.dir().filePath(
+        fileInfo.completeBaseName() + "_compressed.mp4"
+    );
+    m_outputPath->setText(defaultOutput);
+
+    // Submit non-blocking async metadata probe request (high priority for active tab)
+    m_pendingMetadataId = m_scheduler.requestMetadata(path, "compress_meta", true);
+}
+
+void VideoCompressWidget::onInspectionMetadataReady(const ProbeResult& result)
+{
+    if (result.id != m_pendingMetadataId) {
+        return; // Discard stale result if user changed video
+    }
+
+    if (!result.success) {
+        m_videoLoaded = false;
+        m_currentMetadata = VideoMetadata();
+        m_placeholderCard->show();
+        m_previewContainer->hide();
+        m_previewToolbar->hide();
+        m_statusLabel->setText(QString("Probe error: %1").arg(result.errorMessage));
+        updateCompressionCalculations();
+        return;
+    }
+
+    m_currentMetadata = result.metadata;
+    m_videoLoaded = true;
+    m_statusLabel->setText("");
 
     // Source Metadata Banner
     const qint64 origSize = (m_currentMetadata.fileSizeBytes > 0)
         ? m_currentMetadata.fileSizeBytes
-        : QFileInfo(path).size();
+        : QFileInfo(result.id.filePath).size();
     m_currentMetadata.fileSizeBytes = origSize;
 
     double origBitrateKbps = 0.0;
@@ -421,22 +498,30 @@ void VideoCompressWidget::loadVideo(const QString& path)
             .arg(m_currentMetadata.audioCodec.isEmpty() ? "none" : m_currentMetadata.audioCodec)
     );
 
-    // Auto-generate output filename if blank or matching previous default
-    const QFileInfo fileInfo(path);
-    const QString defaultOutput = fileInfo.dir().filePath(
-        fileInfo.completeBaseName() + "_compressed.mp4"
-    );
-    m_outputPath->setText(defaultOutput);
-
-    // Extract thumbnail at ~10% timestamp
+    // Extract thumbnail asynchronously at ~10% timestamp
     const double thumbTimestamp = std::min(1.0, m_currentMetadata.durationSeconds * 0.1);
-    QPixmap pix;
-    if (m_mediaService.extractThumbnail(path, thumbTimestamp, pix)) {
-        m_sourceThumbnailPixmap = pix;
-        renderThumbnail();
-    }
+    m_pendingThumbId = m_scheduler.requestThumbnail(
+        result.id.filePath,
+        thumbTimestamp,
+        0,
+        0,
+        "compress_thumb",
+        true
+    );
 
     updateCompressionCalculations();
+}
+
+void VideoCompressWidget::onInspectionThumbnailReady(const ThumbnailResult& result)
+{
+    if (result.id != m_pendingThumbId) {
+        return; // Discard stale thumbnail result
+    }
+
+    if (result.success && !result.thumbnail.isNull()) {
+        m_sourceThumbnailPixmap = result.thumbnail;
+        renderThumbnail();
+    }
 }
 
 void VideoCompressWidget::renderThumbnail()
@@ -446,14 +531,17 @@ void VideoCompressWidget::renderThumbnail()
         return;
     }
 
-    const QSize targetSize = m_thumbnailLabel->size();
+    const qreal dpr = devicePixelRatioF();
+    const QSize targetSize = (m_thumbnailLabel->size() - QSize(8, 8)) * dpr;
     if (targetSize.width() <= 10 || targetSize.height() <= 10) {
         return;
     }
 
-    m_thumbnailLabel->setPixmap(
-        m_sourceThumbnailPixmap.scaled(targetSize, Qt::KeepAspectRatio, Qt::SmoothTransformation)
+    QPixmap scaled = m_sourceThumbnailPixmap.scaled(
+        targetSize, Qt::KeepAspectRatio, Qt::SmoothTransformation
     );
+    scaled.setDevicePixelRatio(dpr);
+    m_thumbnailLabel->setPixmap(scaled);
 }
 
 void VideoCompressWidget::onPercentageSliderChanged(int value)
@@ -699,8 +787,20 @@ void VideoCompressWidget::onVideoCompressFinished(bool success, const QString& e
     }
 }
 
+void VideoCompressWidget::onClearClicked()
+{
+    m_scheduler.cancelRequestsForPurpose("compress_meta");
+    m_scheduler.cancelRequestsForPurpose("compress_thumb");
+    m_videoPath->clear();
+    m_outputPath->clear();
+    loadVideo("");
+}
+
 void VideoCompressWidget::setUiBusy(bool busy)
 {
+    m_placeholderAddButton->setEnabled(!busy);
+    m_chooseVideoButton->setEnabled(!busy);
+    m_clearButton->setEnabled(!busy);
     m_videoButton->setEnabled(!busy);
     m_videoPath->setEnabled(!busy);
     m_preset75Btn->setEnabled(!busy);
