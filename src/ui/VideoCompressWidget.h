@@ -3,7 +3,9 @@
 #include <QWidget>
 #include <QPixmap>
 #include "../media/MediaService.h"
+#include "../media/InspectionTypes.h"
 
+class InspectionScheduler;
 class QLineEdit;
 class QLabel;
 class QPushButton;
@@ -24,6 +26,7 @@ class VideoCompressWidget : public QWidget
 public:
     explicit VideoCompressWidget(
         MediaService& mediaService,
+        InspectionScheduler& scheduler,
         QWidget* parent = nullptr
     );
     ~VideoCompressWidget() override = default;
@@ -54,6 +57,10 @@ private slots:
     void onVideoCompressCancelled();
     void onVideoCompressFinished(bool success, const QString& errorMessage);
 
+    // InspectionScheduler signals
+    void onInspectionMetadataReady(const ProbeResult& result);
+    void onInspectionThumbnailReady(const ThumbnailResult& result);
+
 private:
     void setUiBusy(bool busy);
     void loadVideo(const QString& path);
@@ -64,9 +71,13 @@ private:
     static QString formatDuration(double seconds);
 
     MediaService& m_mediaService;
+    InspectionScheduler& m_scheduler;
     VideoMetadata m_currentMetadata;
     bool m_videoLoaded = false;
     QPixmap m_sourceThumbnailPixmap;
+
+    RequestId m_pendingMetadataId;
+    RequestId m_pendingThumbId;
 
     // Left Column Preview & Summary
     QWidget* m_placeholderCard;

@@ -28,7 +28,7 @@ MainWindow::MainWindow(
       m_imageAudioWidget(new ImageAudioWidget(mediaService, this)),
       m_videoTrimWidget(new VideoTrimWidget(mediaService, scheduler, this)),
       m_videoCombineWidget(new VideoCombineWidget(mediaService, scheduler, this)),
-      m_videoCompressWidget(new VideoCompressWidget(mediaService, this))
+      m_videoCompressWidget(new VideoCompressWidget(mediaService, scheduler, this))
 {
     setWindowTitle("Picture This");
     resize(980, 600);

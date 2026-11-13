@@ -1,5 +1,6 @@
 #include "VideoCompressWidget.h"
 #include "../media/MediaService.h"
+#include "../media/InspectionScheduler.h"
 
 #include <algorithm>
 #include <QDateTime>
@@ -28,9 +29,11 @@
 
 VideoCompressWidget::VideoCompressWidget(
     MediaService& mediaService,
+    InspectionScheduler& scheduler,
     QWidget* parent)
     : QWidget(parent),
       m_mediaService(mediaService),
+      m_scheduler(scheduler),
       m_placeholderCard(new QWidget(this)),
       m_placeholderAddButton(new QPushButton("+ Choose Video", this)),
       m_previewContainer(new QWidget(this)),
@@ -338,6 +341,10 @@ VideoCompressWidget::VideoCompressWidget(
     connect(&m_mediaService, &MediaService::videoCompressCancelled, this, &VideoCompressWidget::onVideoCompressCancelled);
     connect(&m_mediaService, &MediaService::videoCompressFinished, this, &VideoCompressWidget::onVideoCompressFinished);
 
+    // InspectionScheduler connections (asynchronous, bounded pipeline)
+    connect(&m_scheduler, &InspectionScheduler::metadataReady, this, &VideoCompressWidget::onInspectionMetadataReady);
+    connect(&m_scheduler, &InspectionScheduler::thumbnailReady, this, &VideoCompressWidget::onInspectionThumbnailReady);
+
     updateCompressionCalculations();
 }
 
@@ -409,6 +416,11 @@ void VideoCompressWidget::onVideoPathChanged(const QString& path)
 
 void VideoCompressWidget::loadVideo(const QString& path)
 {
+    m_scheduler.cancelRequestsForPurpose("compress_meta");
+    m_scheduler.cancelRequestsForPurpose("compress_thumb");
+    m_pendingMetadataId = RequestId();
+    m_pendingThumbId = RequestId();
+
     m_videoLoaded = false;
     m_sourceThumbnailPixmap = QPixmap();
     m_thumbnailLabel->clear();
@@ -419,29 +431,54 @@ void VideoCompressWidget::loadVideo(const QString& path)
         m_previewContainer->hide();
         m_previewToolbar->hide();
         m_sourceMetadataLabel->setText("No video loaded");
+        m_statusLabel->setText("");
         updateCompressionCalculations();
         return;
     }
 
-    QString probeError;
-    if (!m_mediaService.getVideoMetadata(path, m_currentMetadata, &probeError)) {
-        m_placeholderCard->show();
-        m_previewContainer->hide();
-        m_previewToolbar->hide();
-        m_statusLabel->setText(QString("Probe error: %1").arg(probeError));
-        updateCompressionCalculations();
-        return;
-    }
-
-    m_videoLoaded = true;
+    // Set UI to probing state
     m_placeholderCard->hide();
     m_previewContainer->show();
     m_previewToolbar->show();
+    m_sourceMetadataLabel->setText("Probing video metadata...");
+    m_statusLabel->setText("Analyzing video streams...");
+
+    // Auto-generate output filename if blank or matching previous default
+    const QFileInfo fileInfo(path);
+    const QString defaultOutput = fileInfo.dir().filePath(
+        fileInfo.completeBaseName() + "_compressed.mp4"
+    );
+    m_outputPath->setText(defaultOutput);
+
+    // Submit non-blocking async metadata probe request (high priority for active tab)
+    m_pendingMetadataId = m_scheduler.requestMetadata(path, "compress_meta", true);
+}
+
+void VideoCompressWidget::onInspectionMetadataReady(const ProbeResult& result)
+{
+    if (result.id != m_pendingMetadataId) {
+        return; // Discard stale result if user changed video
+    }
+
+    if (!result.success) {
+        m_videoLoaded = false;
+        m_currentMetadata = VideoMetadata();
+        m_placeholderCard->show();
+        m_previewContainer->hide();
+        m_previewToolbar->hide();
+        m_statusLabel->setText(QString("Probe error: %1").arg(result.errorMessage));
+        updateCompressionCalculations();
+        return;
+    }
+
+    m_currentMetadata = result.metadata;
+    m_videoLoaded = true;
+    m_statusLabel->setText("");
 
     // Source Metadata Banner
     const qint64 origSize = (m_currentMetadata.fileSizeBytes > 0)
         ? m_currentMetadata.fileSizeBytes
-        : QFileInfo(path).size();
+        : QFileInfo(result.id.filePath).size();
     m_currentMetadata.fileSizeBytes = origSize;
 
     double origBitrateKbps = 0.0;
@@ -461,22 +498,30 @@ void VideoCompressWidget::loadVideo(const QString& path)
             .arg(m_currentMetadata.audioCodec.isEmpty() ? "none" : m_currentMetadata.audioCodec)
     );
 
-    // Auto-generate output filename if blank or matching previous default
-    const QFileInfo fileInfo(path);
-    const QString defaultOutput = fileInfo.dir().filePath(
-        fileInfo.completeBaseName() + "_compressed.mp4"
-    );
-    m_outputPath->setText(defaultOutput);
-
-    // Extract thumbnail at ~10% timestamp
+    // Extract thumbnail asynchronously at ~10% timestamp
     const double thumbTimestamp = std::min(1.0, m_currentMetadata.durationSeconds * 0.1);
-    QPixmap pix;
-    if (m_mediaService.extractThumbnail(path, thumbTimestamp, pix)) {
-        m_sourceThumbnailPixmap = pix;
-        renderThumbnail();
-    }
+    m_pendingThumbId = m_scheduler.requestThumbnail(
+        result.id.filePath,
+        thumbTimestamp,
+        0,
+        0,
+        "compress_thumb",
+        true
+    );
 
     updateCompressionCalculations();
+}
+
+void VideoCompressWidget::onInspectionThumbnailReady(const ThumbnailResult& result)
+{
+    if (result.id != m_pendingThumbId) {
+        return; // Discard stale thumbnail result
+    }
+
+    if (result.success && !result.thumbnail.isNull()) {
+        m_sourceThumbnailPixmap = result.thumbnail;
+        renderThumbnail();
+    }
 }
 
 void VideoCompressWidget::renderThumbnail()
@@ -486,14 +531,17 @@ void VideoCompressWidget::renderThumbnail()
         return;
     }
 
-    const QSize targetSize = m_thumbnailLabel->size();
+    const qreal dpr = devicePixelRatioF();
+    const QSize targetSize = (m_thumbnailLabel->size() - QSize(8, 8)) * dpr;
     if (targetSize.width() <= 10 || targetSize.height() <= 10) {
         return;
     }
 
-    m_thumbnailLabel->setPixmap(
-        m_sourceThumbnailPixmap.scaled(targetSize, Qt::KeepAspectRatio, Qt::SmoothTransformation)
+    QPixmap scaled = m_sourceThumbnailPixmap.scaled(
+        targetSize, Qt::KeepAspectRatio, Qt::SmoothTransformation
     );
+    scaled.setDevicePixelRatio(dpr);
+    m_thumbnailLabel->setPixmap(scaled);
 }
 
 void VideoCompressWidget::onPercentageSliderChanged(int value)
@@ -741,6 +789,8 @@ void VideoCompressWidget::onVideoCompressFinished(bool success, const QString& e
 
 void VideoCompressWidget::onClearClicked()
 {
+    m_scheduler.cancelRequestsForPurpose("compress_meta");
+    m_scheduler.cancelRequestsForPurpose("compress_thumb");
     m_videoPath->clear();
     m_outputPath->clear();
     loadVideo("");
