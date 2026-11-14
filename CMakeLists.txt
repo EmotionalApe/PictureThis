@@ -28,6 +28,8 @@ qt_add_executable(PictureThis
     src/ui/VideoCombineWidget.h
     src/ui/VideoCompressWidget.cpp
     src/ui/VideoCompressWidget.h
+    src/ui/VideoCompareWidget.cpp
+    src/ui/VideoCompareWidget.h
     src/ui/SettingsDialog.cpp
     src/ui/SettingsDialog.h
 

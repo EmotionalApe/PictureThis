@@ -8,6 +8,7 @@ class ImageAudioWidget;
 class VideoTrimWidget;
 class VideoCombineWidget;
 class VideoCompressWidget;
+class VideoCompareWidget;
 class QTabWidget;
 class QCloseEvent;
 class QLabel;
@@ -47,6 +48,7 @@ private:
     VideoTrimWidget* m_videoTrimWidget;
     VideoCombineWidget* m_videoCombineWidget;
     VideoCompressWidget* m_videoCompressWidget;
+    VideoCompareWidget* m_videoCompareWidget;
 
     QWidget* m_alertBanner = nullptr;
     QLabel* m_alertLabel = nullptr;
