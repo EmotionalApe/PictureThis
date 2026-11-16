@@ -23,7 +23,8 @@ InspectionWorker::InspectionWorker(int workerId, QObject* parent)
     connect(&m_process, &QProcess::finished,
             this, &InspectionWorker::onProcessFinished);
     connect(&m_process, &QProcess::errorOccurred,
-            this, &InspectionWorker::onProcessError);
+            this, &InspectionWorker::onProcessError,
+            Qt::QueuedConnection);
 }
 
 InspectionWorker::~InspectionWorker()
@@ -105,7 +106,9 @@ void InspectionWorker::cancel()
 
     if (m_process.state() != QProcess::NotRunning) {
         m_process.kill();
+        m_process.waitForFinished(100);
     }
+    handleTaskCompletion(false, "Task was cancelled.");
 }
 
 void InspectionWorker::onProcessReadyReadStandardOutput()

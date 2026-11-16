@@ -11,7 +11,7 @@
 #include <string>
 #include <unordered_map>
 
-#include "MediaService.h" // VideoMetadata
+#include "VideoMetadata.h"
 
 // ---------------------------------------------------------------------------
 // CacheKey

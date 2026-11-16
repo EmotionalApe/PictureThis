@@ -3,7 +3,7 @@
 #include <QString>
 #include <QPixmap>
 #include <cstdint>
-#include "MediaService.h"
+#include "VideoMetadata.h"
 
 enum class InspectionKind {
     Metadata,
