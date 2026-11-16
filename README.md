@@ -1,8 +1,8 @@
-# Picture This
+# PictureThis
 
 > A fast, lightweight C++20 / Qt 6 desktop media utility powered by FFmpeg.
 
-**Picture This** is a desktop application that wraps `ffmpeg` and `ffprobe` with a clean, event-driven C++ architecture. Rather than linking against FFmpeg C libraries or blocking the GUI during media operations, it orchestrates child OS processes and communicates over standard pipes—keeping the interface responsive and resource-efficient.
+**PictureThis** is a desktop application that wraps `ffmpeg` and `ffprobe` with a clean, event-driven C++ architecture. Rather than linking against FFmpeg C libraries or blocking the GUI during media operations, it orchestrates child OS processes and communicates over standard pipes—keeping the interface responsive and resource-efficient.
 
 ---
 
