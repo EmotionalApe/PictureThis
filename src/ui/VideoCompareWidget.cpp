@@ -223,6 +223,7 @@ VideoCompareWidget::VideoCompareWidget(
         "Load two video files above to analyze container atoms, stream parameters, and evaluate web/mobile playback compliance.",
         m_diagnosticsCard
     );
+    m_diagnosticsContent->setTextFormat(Qt::RichText);
     m_diagnosticsContent->setStyleSheet("font-size: 11px; color: palette(placeholder-text); line-height: 1.4;");
     m_diagnosticsContent->setWordWrap(true);
     diagLayout->addWidget(m_diagnosticsContent);
