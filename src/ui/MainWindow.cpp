@@ -3,6 +3,7 @@
 #include "VideoTrimWidget.h"
 #include "VideoCombineWidget.h"
 #include "VideoCompressWidget.h"
+#include "VideoCompareWidget.h"
 #include "SettingsDialog.h"
 #include "../media/MediaService.h"
 #include "../media/ExecutableLocator.h"
@@ -28,7 +29,8 @@ MainWindow::MainWindow(
       m_imageAudioWidget(new ImageAudioWidget(mediaService, this)),
       m_videoTrimWidget(new VideoTrimWidget(mediaService, scheduler, this)),
       m_videoCombineWidget(new VideoCombineWidget(mediaService, scheduler, this)),
-      m_videoCompressWidget(new VideoCompressWidget(mediaService, scheduler, this))
+      m_videoCompressWidget(new VideoCompressWidget(mediaService, scheduler, this)),
+      m_videoCompareWidget(new VideoCompareWidget(mediaService, scheduler, this))
 {
     setWindowTitle("Picture This");
     resize(980, 600);
@@ -69,6 +71,9 @@ MainWindow::MainWindow(
 
     // Tab 4: Video Compressing
     m_tabWidget->addTab(m_videoCompressWidget, "Compress Video");
+
+    // Tab 5: Video Comparing & Media Inspector
+    m_tabWidget->addTab(m_videoCompareWidget, "Compare Videos");
 
     // Top-right corner settings button
     m_settingsBtn = new QPushButton("⚙ Settings", this);

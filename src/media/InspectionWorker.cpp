@@ -72,7 +72,8 @@ bool InspectionWorker::startTask(const InspectionTask& task, const QString& exec
 
     if (task.kind == InspectionKind::Metadata) {
         arguments << "-v" << "error"
-                  << "-show_entries" << "stream=codec_type,codec_name,width,height,duration:format=duration,size"
+                  << "-show_format"
+                  << "-show_streams"
                   << "-of" << "json"
                   << task.filePath;
     } else {
@@ -223,6 +224,17 @@ bool InspectionWorker::parseProbeMetadata(const QByteArray& jsonData, VideoMetad
 
     const QJsonObject rootObj = doc.object();
 
+    auto parseRate = [](const QString& rateStr) -> double {
+        if (rateStr.isEmpty() || rateStr == "0/0") return 0.0;
+        const int slashIdx = rateStr.indexOf('/');
+        if (slashIdx != -1) {
+            const double num = rateStr.left(slashIdx).toDouble();
+            const double den = rateStr.mid(slashIdx + 1).toDouble();
+            return den > 0.0 ? (num / den) : 0.0;
+        }
+        return rateStr.toDouble();
+    };
+
     // Streams
     const QJsonArray streams = rootObj.value("streams").toArray();
     for (const QJsonValue& val : streams) {
@@ -232,10 +244,46 @@ bool InspectionWorker::parseProbeMetadata(const QByteArray& jsonData, VideoMetad
 
         if (type == "video" && outMeta.videoCodec.isEmpty()) {
             outMeta.videoCodec = codec;
+            outMeta.videoCodecLongName = streamObj.value("codec_long_name").toString();
             outMeta.width = streamObj.value("width").toInt();
             outMeta.height = streamObj.value("height").toInt();
-        } else if (type == "audio" && outMeta.audioCodec.isEmpty()) {
+            outMeta.videoProfile = streamObj.value("profile").toString();
+
+            const QJsonValue levelVal = streamObj.value("level");
+            if (levelVal.isDouble()) {
+                const int lvl = levelVal.toInt();
+                if (lvl >= 10 && lvl < 100) {
+                    outMeta.videoLevel = QString("%1.%2").arg(lvl / 10).arg(lvl % 10);
+                } else if (lvl > 0) {
+                    outMeta.videoLevel = QString::number(lvl);
+                }
+            } else if (levelVal.isString()) {
+                outMeta.videoLevel = levelVal.toString();
+            }
+
+            outMeta.pixelFormat = streamObj.value("pix_fmt").toString();
+            outMeta.colorRange = streamObj.value("color_range").toString();
+            outMeta.colorSpace = streamObj.value("color_space").toString();
+            outMeta.colorTransfer = streamObj.value("color_transfer").toString();
+            outMeta.colorPrimaries = streamObj.value("color_primaries").toString();
+            outMeta.displayAspectRatio = streamObj.value("display_aspect_ratio").toString();
+            outMeta.sampleAspectRatio = streamObj.value("sample_aspect_ratio").toString();
+            outMeta.videoBitrate = streamObj.value("bit_rate").toString().toLongLong();
+
+            double fps = parseRate(streamObj.value("r_frame_rate").toString());
+            if (fps <= 0.0) {
+                fps = parseRate(streamObj.value("avg_frame_rate").toString());
+            }
+            outMeta.frameRate = fps;
+
+        } else if (type == "audio" && !outMeta.hasAudio) {
+            outMeta.hasAudio = true;
             outMeta.audioCodec = codec;
+            outMeta.audioCodecLongName = streamObj.value("codec_long_name").toString();
+            outMeta.audioSampleRate = streamObj.value("sample_rate").toString().toInt();
+            outMeta.audioChannels = streamObj.value("channels").toInt();
+            outMeta.audioChannelLayout = streamObj.value("channel_layout").toString();
+            outMeta.audioBitrate = streamObj.value("bit_rate").toString().toLongLong();
         }
     }
 
@@ -243,6 +291,9 @@ bool InspectionWorker::parseProbeMetadata(const QByteArray& jsonData, VideoMetad
     const QJsonObject formatObj = rootObj.value("format").toObject();
     outMeta.durationSeconds = formatObj.value("duration").toString().toDouble();
     outMeta.fileSizeBytes = formatObj.value("size").toString().toLongLong();
+    outMeta.formatName = formatObj.value("format_name").toString();
+    outMeta.formatLongName = formatObj.value("format_long_name").toString();
+    outMeta.overallBitrate = formatObj.value("bit_rate").toString().toLongLong();
 
     // Fallback: look for duration in streams if format duration is missing
     if (outMeta.durationSeconds <= 0.0) {
