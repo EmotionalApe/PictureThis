@@ -19,7 +19,8 @@ InspectionScheduler::InspectionScheduler(
         connect(worker, &InspectionWorker::thumbnailFinished,
                 this, &InspectionScheduler::onWorkerThumbnailFinished);
         connect(worker, &InspectionWorker::workerFinished,
-                this, &InspectionScheduler::onWorkerFinished);
+                this, &InspectionScheduler::onWorkerFinished,
+                Qt::QueuedConnection);
         m_workers.append(worker);
     }
 }

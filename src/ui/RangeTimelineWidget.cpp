@@ -53,7 +53,6 @@ void RangeTimelineWidget::paintEvent(QPaintEvent* event)
     painter.setRenderHint(QPainter::Antialiasing, true);
 
     const int w = width();
-    const int h = height();
 
     const int trackMarginH = 8;
     const int trackY = 8;

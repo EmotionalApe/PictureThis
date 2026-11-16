@@ -11,6 +11,24 @@ set(CMAKE_CXX_EXTENSIONS OFF)
 
 set(CMAKE_AUTOMOC ON)
 
+# Compiler warnings
+if (MSVC)
+    add_compile_options(/W4)
+else()
+    add_compile_options(-Wall -Wextra -Wpedantic)
+endif()
+
+# Sanitizer build option
+option(ENABLE_ASAN "Enable AddressSanitizer and UndefinedBehaviorSanitizer" OFF)
+if (ENABLE_ASAN)
+    if (MSVC)
+        add_compile_options(/fsanitize=address)
+    else()
+        add_compile_options(-fsanitize=address,undefined -fno-omit-frame-pointer)
+        add_link_options(-fsanitize=address,undefined)
+    endif()
+endif()
+
 find_package(Qt6 REQUIRED COMPONENTS Widgets)
 
 qt_add_executable(PictureThis
@@ -39,6 +57,7 @@ qt_add_executable(PictureThis
     src/media/ExecutableLocator.h
 
     src/media/InspectionTypes.h
+    src/media/VideoMetadata.h
     src/media/InspectionWorker.cpp
     src/media/InspectionWorker.h
     src/media/InspectionScheduler.cpp
@@ -52,3 +71,7 @@ qt_add_executable(PictureThis
 target_link_libraries(PictureThis PRIVATE
     Qt6::Widgets
 )
+
+# Automated testing suite
+enable_testing()
+add_subdirectory(tests)
