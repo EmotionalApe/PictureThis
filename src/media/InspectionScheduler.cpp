@@ -140,9 +140,11 @@ void InspectionScheduler::cancelRequest(const RequestId& id)
 
     m_cancelledSerials.insert(id.serial);
 
-    // Remove from pending queue
+    // Remove from pending queue — also erase from the cancelled set immediately,
+    // since no worker will ever complete this task and clean it up.
     for (auto it = m_pendingQueue.begin(); it != m_pendingQueue.end(); ) {
         if (it->id.serial == id.serial) {
+            m_cancelledSerials.remove(it->id.serial);
             it = m_pendingQueue.erase(it);
         } else {
             ++it;
@@ -170,6 +172,7 @@ void InspectionScheduler::cancelRequestsForFile(const QString& filePath)
         if (it->filePath == filePath) {
             m_cancelledSerials.insert(it->id.serial);
             emit inspectionStatusChanged(it->id, InspectionStatus::Cancelled);
+            m_cancelledSerials.remove(it->id.serial); // task never reaches a worker; clean up immediately
             it = m_pendingQueue.erase(it);
         } else {
             ++it;
@@ -196,6 +199,7 @@ void InspectionScheduler::cancelRequestsForPurpose(const QString& purpose)
         if (it->id.purpose == purpose) {
             m_cancelledSerials.insert(it->id.serial);
             emit inspectionStatusChanged(it->id, InspectionStatus::Cancelled);
+            m_cancelledSerials.remove(it->id.serial); // task never reaches a worker; clean up immediately
             it = m_pendingQueue.erase(it);
         } else {
             ++it;
@@ -215,7 +219,9 @@ void InspectionScheduler::cancelRequestsForPurpose(const QString& purpose)
 void InspectionScheduler::cancelAll()
 {
     for (const auto& task : m_pendingQueue) {
-        m_cancelledSerials.insert(task.id.serial);
+        // Emit status change but do NOT add to m_cancelledSerials — the task
+        // never reaches a worker, so no worker completion will clean it up.
+        // The queue is about to be cleared entirely, so no tombstone needed.
         emit inspectionStatusChanged(task.id, InspectionStatus::Cancelled);
     }
     m_pendingQueue.clear();

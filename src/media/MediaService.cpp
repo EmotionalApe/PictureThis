@@ -297,7 +297,7 @@ bool MediaService::combineVideos(
                     .arg(i);
             } else {
                 const double dur = std::max(0.1, metadatas[i].durationSeconds);
-                filterGraph += QString("aevalsrc=0:d=%1:s=44100[a%1];")
+                filterGraph += QString("aevalsrc=0:d=%1:s=44100[a%2];")
                     .arg(dur, 0, 'f', 3).arg(i);
             }
 
